@@ -1,0 +1,38 @@
+#!/bin/sh
+# based on build_deps.sh from basho/eleveldb
+
+open62541_VSN="v1.2"
+
+set -e
+
+if [ `basename $PWD` != "c_src" ]; then
+    # originally "pushd c_src" of bash
+    # but no need to use directory stack push here
+    cd c_src
+fi
+
+BASEDIR="$PWD"
+
+# detecting gmake and if exists use it
+# if not use make
+# (code from github.com/tuncer/re2/c_src/build_deps.sh
+which gmake 1>/dev/null 2>/dev/null && MAKE=gmake
+MAKE=${MAKE:-make}
+
+case "$1" in
+    clean)
+        rm -rf open62541
+        ;;
+
+    build)
+        if [ ! -d open62541 ]; then
+            git clone -b $open62541_VSN https://github.com/open62541/open62541.git
+        fi
+        cd open62541
+        mkdir -p build
+        cd build
+        cmake -DCMAKE_INSTALL_PREFIX=_install .. 
+        make && make install
+
+        ;;
+esac
