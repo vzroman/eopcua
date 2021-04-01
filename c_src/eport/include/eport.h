@@ -18,6 +18,17 @@
 
 #include <cjson/cJSON.h>
 
+// The header of the request that defines the total lengsth of the message
+#define HEADER_LENGTH 4
+
+// Input file descriptor for receiving requests from erlang
+#define IN_DESC 3
+
+// Output file descriptor for sending response to erlang
+#define OUT_DESC 4
+
+typedef unsigned char byte;
+
 // Callback type 
 typedef void (*eport_request_handler) (cJSON *);
 

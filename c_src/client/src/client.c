@@ -23,6 +23,7 @@
  
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include "client.h"
  
 // #ifdef UA_ENABLE_SUBSCRIPTIONS
@@ -52,7 +53,7 @@ void on_request( cJSON *req ){
         const char *error_ptr = cJSON_GetErrorPtr();
         if (error_ptr != NULL)
         {
-            printf("Error before: %s\n", error_ptr);
+            printf("Error before: %s\r\n", error_ptr);
         }
         return;
     }
@@ -60,16 +61,30 @@ void on_request( cJSON *req ){
     x1 = cJSON_GetObjectItemCaseSensitive(req, "x1");
     if (cJSON_IsNumber(x1))
     {
-        printf("x1 is %d\n", x1->valueint);
+        printf("x1 is %d\r\n", x1->valueint);
     }else{
-        printf("x1 is not a number\n");
+        printf("x1 is not a number\r\n");
     }
+
+
+    cJSON *reply = cJSON_CreateObject();
+    if (cJSON_AddStringToObject(reply, "some_field", "some_value") == NULL)
+    {
+        printf("unable to add field to JSON\r\n");
+        exit(EXIT_FAILURE);
+    }
+
+    char *replyString = cJSON_Print( reply );
+    printf("replyString: %s\r\n", replyString);
+    printf("sizeof replyString: %d\r\n", (int)strlen(replyString));
+
+    free(replyString);
 
 
 }
 
 int main(int argc, char *argv[]) {
-    printf("enter eport_loop\n");
+    printf("enter eport_loop\r\n");
     eport_loop( &on_request );
 //     UA_Client *client = UA_Client_new();
 //     UA_ClientConfig_setDefault(UA_Client_getConfig(client));
