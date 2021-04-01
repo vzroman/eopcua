@@ -1,15 +1,26 @@
 -module(eopcua).
 
 %%==============================================================================
-%%	API
+%%	Control API
 %%==============================================================================
 -export([
     start_link/1, start_link/2,
     stop/1
 ]).
 
--define(CONNECT_TIMEOUT,30000).
+%%==============================================================================
+%%	Protocol API
+%%==============================================================================
+-export([
+    read_value/2
+]).
 
+-define(CONNECT_TIMEOUT,30000).
+-define(RESPONSE_TIMEOUT,5000).
+
+%%==============================================================================
+%%	Control API
+%%==============================================================================
 start_link(Name) ->
     start_link(Name,#{ timeout => ?CONNECT_TIMEOUT }).
 start_link(Name, #{timeout := Timeout } = Options) ->
@@ -27,6 +38,21 @@ start_link(Name, #{timeout := Timeout } = Options) ->
 stop(PID) ->
     PID ! { self(), stop }.
 
+%%==============================================================================
+%%	Protocol API
+%%==============================================================================
+read_value(PID, Node)->
+    read_value(PID,Node,?RESPONSE_TIMEOUT).
+read_value(PID, Node, Timeout)->
+    call_ext( PID, {read_value, Node}, Timeout ).
+
+call_ext( PID, Msg, Timeout )->
+    PID ! { self(), call, Msg, Timeout },
+    receive
+        {PID, reply, Result }-> Result
+    after
+        Timeout-> {error,timeout}
+    end.    
 %%==============================================================================
 %%	Initialization procedure
 %%==============================================================================
@@ -49,7 +75,7 @@ init( Name, Owner, Options ) ->
 init_ext_programm( Name )->
     try 
         Program = create_program_file( Name ),
-        Port = open_port({spawn, Program}, [{packet, 2},binary]),
+        Port = open_port({spawn, Program}, [{packet, 2}, binary, nouse_stdio]),
         {ok,Port}
     catch
         _:Error->{error,Error}
@@ -76,8 +102,9 @@ connect(Port, Name, #{timeout := Timeout})->
 %%==============================================================================
 loop( Port, Owner, Options ) ->
     receive
-        {Owner, call, Msg} ->
-            Owner ! call( Port, Msg, Options ),  
+        {From, call, Msg, Timeout} ->
+            Result = call( Port, Msg, Options, Timeout ),
+            From ! {self(), reply, Result},  
             loop(Port,Owner,Options);
         {Port, {data, Data}}->
             notify( Owner, Data, Options ),
@@ -91,10 +118,13 @@ loop( Port, Owner, Options ) ->
             exit({port_terminated, Reason});
         {'EXIT', Owner, Reason} ->
             port_close( Port ),
-            exit( Reason )
+            exit( Reason );
+        _Unexpected->
+            % TODO. Log it
+            loop(Port, Owner, Options)
     end.
 
-call( Port, Msg, #{timeout:=Timeout} )->
+call( Port, Msg, _Options, Timeout )->
     Port ! {self(), {command, encode(Msg)}},
     receive
         {Port, {data, Data}} ->

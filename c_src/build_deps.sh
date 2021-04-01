@@ -22,9 +22,11 @@ MAKE=${MAKE:-make}
 case "$1" in
     clean)
         rm -rf open62541
+        rm -rf cJSON
         ;;
 
     build)
+        # open62541
         if [ ! -d open62541 ]; then
             git clone -b $open62541_VSN https://github.com/open62541/open62541.git
         fi
@@ -34,5 +36,16 @@ case "$1" in
         cmake -DCMAKE_INSTALL_PREFIX=_install .. 
         make && make install
 
+        # cJSON
+        cd $BASEDIR
+        if [ ! -d cJSON ]; then
+            git clone -b v1.7.14 https://github.com/DaveGamble/cJSON.git
+        fi
+        cd cJSON
+        mkdir -p build
+        cd build
+        cmake cmake .. -DENABLE_CJSON_UTILS=On -DENABLE_CJSON_TEST=Off -DCMAKE_INSTALL_PREFIX=_install -DBUILD_SHARED_LIBS=Off 
+        make && make install
+        
         ;;
 esac
