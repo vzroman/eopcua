@@ -4,7 +4,10 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/c_src/open62541/include"
+                "${workspaceFolder}/c_src/eport/include",
+                "${workspaceFolder}/c_src/client/include",
+                "${workspaceFolder}/c_src/open62541/build/_install/include",
+                "${workspaceFolder}/c_src/cJSON/build/_install/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
