@@ -16,16 +16,109 @@
 * under the License.
 ----------------------------------------------------------------*/
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 // #include <open62541/client_config_default.h>
 // #include <open62541/client_highlevel.h>
 // #include <open62541/client_subscriptions.h>
 // #include <open62541/plugin/log_stdout.h>
+#include "opcua_client.h"
+#include "opcua_client_protocol.h"
  
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include "client.h"
- 
+cJSON* on_error(char* text);
+cJSON* on_ok(cJSON* response);
+cJSON* opcua_client_connect(cJSON* request);
+cJSON* opcua_client_read(cJSON* request);
+
+char* on_request( char *requestString ){
+    cJSON *response;
+    char *responseString;
+
+    // Parse the request
+    OPCUA_CLIENT_REQUEST *request = parse_request( requestString );
+
+    // Handle the request
+    if (request == NULL){
+        response = on_error("invalid request");
+    } else if( request->cmd == OPCUA_CLIENT_CONNECT ){
+        response = opcua_client_connect( request->body );
+    } else if (request->cmd == OPCUA_CLIENT_READ ){
+        response = opcua_client_read( request->body );
+    } else{
+        response = on_error("unsupported command type");
+    }
+
+    // Reply
+    responseString = create_response( request, response );
+    purge_request( request );
+
+    return responseString;
+}
+
+cJSON* on_error(char* text){
+    cJSON *response = cJSON_CreateObject();
+    if (cJSON_AddStringToObject(response, "type", "error") == NULL) {
+        goto error;
+    }
+    if (cJSON_AddStringToObject(response, "text", text) == NULL) {
+        goto error;
+    }
+    return response;
+
+error:
+    cJSON_Delete( response );
+    return NULL;
+}
+
+cJSON* on_ok(cJSON *result){
+    cJSON *response = cJSON_CreateObject();
+    if ( cJSON_AddStringToObject(response, "type", "ok") == NULL) {
+        goto error;
+    }
+    if ( !cJSON_AddItemToObject(response, "result", result) ) {
+        goto error;
+    }
+    return response;
+
+error:
+    cJSON_Delete( response );
+    return NULL;
+}
+
+cJSON* opcua_client_connect(cJSON* request){
+    char *error = NULL;
+    cJSON *response = cJSON_CreateString("TODO: connect");
+    if (response == NULL){
+        goto error;
+    }
+
+    return response;
+
+error:
+    cJSON_Delete( response );
+    if (error == NULL){
+        error = "programming error in opcua_client_connect";
+    }
+    return on_error( error );
+}
+
+cJSON* opcua_client_read(cJSON* request){
+    char *error = NULL;
+    cJSON *response = cJSON_CreateString("TODO: read");
+    if (response == NULL){
+        goto error;
+    }
+    return response;
+
+error:
+    cJSON_Delete( response );
+    if (error == NULL){
+        error = "programming error in opcua_client_read";
+    }
+    return on_error( error );
+}
+
 // #ifdef UA_ENABLE_SUBSCRIPTIONS
 // static void
 // handler_TheAnswerChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
@@ -45,45 +138,9 @@
 //            childId.identifier.numeric);
 //     return UA_STATUSCODE_GOOD;
 // }
-void on_request( cJSON *req ){
-
-    const cJSON *x1 = NULL;
-
-    if (req == NULL) {
-        const char *error_ptr = cJSON_GetErrorPtr();
-        if (error_ptr != NULL)
-        {
-            printf("Error before: %s\r\n", error_ptr);
-        }
-        return;
-    }
-
-    x1 = cJSON_GetObjectItemCaseSensitive(req, "x1");
-    if (cJSON_IsNumber(x1))
-    {
-        printf("x1 is %d\r\n", x1->valueint);
-    }else{
-        printf("x1 is not a number\r\n");
-    }
-
-
-    cJSON *reply = cJSON_CreateObject();
-    if (cJSON_AddStringToObject(reply, "some_field", "some_value") == NULL)
-    {
-        printf("unable to add field to JSON\r\n");
-        exit(EXIT_FAILURE);
-    }
-
-    char *replyString = cJSON_Print( reply );
-    printf("replyString: %s\r\n", replyString);
-    printf("sizeof replyString: %d\r\n", (int)strlen(replyString));
-
-    free(replyString);
-
-
-}
 
 int main(int argc, char *argv[]) {
+
     printf("enter eport_loop\r\n");
     eport_loop( &on_request );
 //     UA_Client *client = UA_Client_new();

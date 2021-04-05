@@ -18,4 +18,4 @@
 #include <eport.h>
 
 // The request handler definition
-void on_request( cJSON *req );
+char* on_request( char *request );

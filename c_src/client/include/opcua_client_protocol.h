@@ -15,22 +15,28 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-
 #include <cjson/cJSON.h>
 
-// The header of the request that defines the total lengsth of the message
-#define HEADER_LENGTH 4
+typedef unsigned long TID;
 
-// Input file descriptor for receiving requests from erlang
-#define IN_DESC 3
+// Command types
+typedef enum OPCUA_CLIENT_CMD_T {
+    OPCUA_CLIENT_CONNECT,
+    OPCUA_CLIENT_CLOSE,
+    OPCUA_CLIENT_READ,
+    OPCUA_CLIENT_WRITE
+} OPCUA_CLIENT_CMD;
 
-// Output file descriptor for sending response to erlang
-#define OUT_DESC 4
+// Request
+typedef struct opcua_client_request{
+    OPCUA_CLIENT_CMD cmd;
+    TID tid;
+    cJSON *body;
+} OPCUA_CLIENT_REQUEST;
 
-typedef unsigned char byte;
+// Parse a request
+OPCUA_CLIENT_REQUEST* parse_request( const char *message );
+void purge_request( OPCUA_CLIENT_REQUEST *request );
 
-// Callback type 
-typedef char* (*eport_request_handler) (char *);
-
-// The loop definition
-void eport_loop( eport_request_handler callback );
+// Build response
+char* create_response( OPCUA_CLIENT_REQUEST *request, cJSON *response );

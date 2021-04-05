@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include "eport.h"
 
 int read_exact(byte *buf, int len);
@@ -28,25 +29,37 @@ int write_cmd(byte *buf, int len);
 
 void eport_loop(eport_request_handler callback){
 
-    byte *buf;
+    byte *request;
+    byte *response;
     int len = 0;
-    len = read_cmd(&buf);
 
-    if (len == EOF)
-    {
-        free(buf);
-        fprintf(stdout,"EXIT port\r\n");
-        exit(EXIT_FAILURE);
+    //-----------the loop--------------------------
+    while ( 1 ){
+        // wait for a request
+        len = read_cmd( &request );
+        if (len == EOF) {
+            free(request);
+            fprintf(stdout,"EXIT port\r\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Handle the request with the callback
+        fprintf(stdout,"message received: %s\r\n",(char *)request);
+        response = (byte *)callback( (char *)request );
+
+        // request is not needed any longer, free its memory
+        free(request);
+
+        // analyze the response
+        if ( response == NULL){
+            response = (byte *)"programming error: NULL response";
+        }
+        len = strlen( (char *)response );
+        write_cmd( response, len );
+        free( response );
     }
-    
-    fprintf(stdout,"message received: %s\r\n",(char *)buf);
-    free(buf);
 
-    cJSON *testJSON = cJSON_Parse( "{\"x1\":1}" );
-    fprintf(stdout,"calback with a JSON\r\n");
-    callback( testJSON );
-    cJSON_Delete( testJSON );
-
+    exit(EXIT_FAILURE);
 }
 
 //----------Read/Write helpers----------------------------------------
