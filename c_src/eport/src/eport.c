@@ -36,6 +36,7 @@ void eport_loop(eport_request_handler callback){
     //-----------the loop--------------------------
     while ( 1 ){
         request = NULL;
+        response = NULL;
         // wait for a request
         len = read_cmd( &request );
         if (len == EOF) {
@@ -119,13 +120,9 @@ int write_cmd(byte *buf, int len){
     // Convert the length from integer to the big-endian
     for (i = 0; i < HEADER_LENGTH; i++){
         lbuf[i] = 0xff & ( len >> (8 * (HEADER_LENGTH - i -1)) ) ;
-        fprintf(stdout,"DEBUG: reply lbuf[%d] = %d\r\n",i,lbuf[i]);
     }
-    fprintf(stdout,"DEBUG: reply length: %d\r\n",len);
 
+    // Send the response
     write_exact(lbuf, HEADER_LENGTH);
-
-    write_exact(buf, len);
-
     return write_exact(buf, len);
 }

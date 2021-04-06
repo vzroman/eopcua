@@ -81,7 +81,7 @@ transaction( PID, Command, Body, Timeout )->
     TID = rand:uniform(16#FFFF),
     Request = #{
         <<"cmd">> => Command,
-        <<"tid">> => rand:uniform(16#FFFF),
+        <<"tid">> => TID,
         <<"body">> => Body
     },
     PID ! { self(), call, jsx:encode(Request), Timeout },
@@ -89,14 +89,17 @@ transaction( PID, Command, Body, Timeout )->
 
 wait_for_reply( PID, Command, TID, Timeout )->
     receive
-        {PID, reply, Result }-> 
+        {PID, reply, {ok, Result} }-> 
             case try jsx:decode(Result, [return_maps]) catch _:_->{invalid_json, Result } end of
-                #{ <<"cmd">> := Command, <<"tid">> := TID, <<"reply">> := Reply }-> 
+                #{<<"cmd">> := Command, <<"tid">> := TID, <<"reply">> := Reply}-> 
                     {ok, Reply};
                 Unexpected->
+                    io:format("unexpected reply from the port ~p\r\n",[Unexpected]),
                     ?LOGWARNING("unexpected reply from the port ~p",[Unexpected]),
                     wait_for_reply( PID, Command, TID, Timeout )
-            end       
+            end;
+        {PID, reply, Error }->
+            Error
     after
         Timeout-> {error, timeout}
     end.    
@@ -150,14 +153,15 @@ loop( Port, Owner, Options ) ->
     end.
 
 call( Port, Msg, _Options, Timeout )->
-    ?LOGINFO("send command ~p",[Msg]),
     Port ! {self(), {command, Msg}},
     receive
         {Port, {data, Data}} ->
-            ?LOGINFO("received data ~p",[Msg]),
+            io:format("data from port ~p\r\n",[Data]),
             {ok, Data }
     after
-        Timeout-> {error, timeout}
+        Timeout->
+            io:format("port timeout ~p\r\n",[Timeout]),
+            {error, timeout}
     end.
 
 %%---------Internal helpers----------------------
