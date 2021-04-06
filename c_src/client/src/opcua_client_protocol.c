@@ -35,6 +35,7 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     request->body = NULL;
 
     // Parse the request to JSON structure
+    fprintf(stdout,"DEBUG: parse JSON\r\n");
     cJSON *JSON = cJSON_Parse( message );
     if (JSON == NULL){
         const char *error_ptr = cJSON_GetErrorPtr();
@@ -47,6 +48,7 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     }
 
     // Parse the type of the request
+    fprintf(stdout,"DEBUG: parse cmd\r\n");
     cmd = cJSON_GetObjectItemCaseSensitive(JSON, "cmd");
     if (cJSON_IsString(cmd) && (cmd->valuestring != NULL)){
         request->cmd = string2cmd( cmd->valuestring );
@@ -61,6 +63,7 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     
 
     // Parse transaction ID
+    fprintf(stdout,"DEBUG: parse tid\r\n");
     tid = cJSON_GetObjectItemCaseSensitive(JSON, "tid");
     if ( cJSON_IsNumber(tid)) {
         request->tid = tid->valuedouble;
@@ -70,9 +73,13 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     }
     
     // Parse body
+    fprintf(stdout,"DEBUG: parse body\r\n");
+    request->body = cJSON_GetObjectItemCaseSensitive(JSON, "body");
     if (request->cmd == OPCUA_CLIENT_CONNECT){
+        fprintf(stdout,"DEBUG: parse connect body\r\n");
         request->body = parse_connect_request( request->body );
     } else if( request->cmd == OPCUA_CLIENT_READ ){
+        fprintf(stdout,"DEBUG: parse read body\r\n");
         request->body = parse_read_request( request->body );
     } else {
         fprintf(stdout,"invalid command type %d\r\n",request->cmd);

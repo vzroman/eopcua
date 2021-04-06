@@ -35,18 +35,20 @@ void eport_loop(eport_request_handler callback){
 
     //-----------the loop--------------------------
     while ( 1 ){
+        request = NULL;
         // wait for a request
         len = read_cmd( &request );
         if (len == EOF) {
-            free(request);
+            if (request != NULL){
+                free(request);
+            }
             fprintf(stdout,"EXIT port\r\n");
             exit(EXIT_FAILURE);
         }
 
         // Handle the request with the callback
-        fprintf(stdout,"message received: %s\r\n",(char *)request);
+        fprintf(stdout,"DEBUG: message received: %s\r\n",(char *)request);
         response = (byte *)callback( (char *)request );
-
         // request is not needed any longer, free its memory
         free(request);
 
@@ -55,6 +57,7 @@ void eport_loop(eport_request_handler callback){
             response = (byte *)"programming error: NULL response";
         }
         len = strlen( (char *)response );
+        fprintf(stdout,"DEBUG: reply with %s\r\n",response);
         write_cmd( response, len );
         free( response );
     }
@@ -94,11 +97,12 @@ int read_cmd(byte **buf) {
     // Step 1. Read the length of the message
     if (read_exact(lbuf, HEADER_LENGTH) != HEADER_LENGTH) return(-1);
 
-    // Convert the length from big-endian to little-endian?
+    // Convert the length buffer to the integer
     len = 0;
-    for (i = HEADER_LENGTH -1; i >= 0; i--){
+    for (i = 0; i < HEADER_LENGTH; i++){
         len = len | (lbuf[i] << (8 * (HEADER_LENGTH - i -1)) );
     }
+    fprintf(stdout,"DEBUG: received length: %d\r\n",len);
 
     // Step 2. Read the message itself
     *buf = malloc(len); // dynamically allocate the memory for the message
@@ -109,13 +113,19 @@ int read_cmd(byte **buf) {
 }
 
 int write_cmd(byte *buf, int len){
-    byte li;
+    byte lbuf[HEADER_LENGTH];
+    int i;
 
-    li = (len >> 8) & 0xff;
-    write_exact(&li, 1);
-    
-    li = len & 0xff;
-    write_exact(&li, 1);
+    // Convert the length from integer to the big-endian
+    for (i = 0; i < HEADER_LENGTH; i++){
+        lbuf[i] = 0xff & ( len >> (8 * (HEADER_LENGTH - i -1)) ) ;
+        fprintf(stdout,"DEBUG: reply lbuf[%d] = %d\r\n",i,lbuf[i]);
+    }
+    fprintf(stdout,"DEBUG: reply length: %d\r\n",len);
+
+    write_exact(lbuf, HEADER_LENGTH);
+
+    write_exact(buf, len);
 
     return write_exact(buf, len);
 }

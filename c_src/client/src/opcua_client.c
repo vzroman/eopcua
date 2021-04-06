@@ -36,9 +36,11 @@ char* on_request( char *requestString ){
     char *responseString;
 
     // Parse the request
+    fprintf(stdout,"DEBUG: parsing the request\r\n");
     OPCUA_CLIENT_REQUEST *request = parse_request( requestString );
 
     // Handle the request
+    fprintf(stdout,"DEBUG: handle the request\r\n");
     if (request == NULL){
         response = on_error("invalid request");
     } else if( request->cmd == OPCUA_CLIENT_CONNECT ){
@@ -51,6 +53,7 @@ char* on_request( char *requestString ){
 
     // Reply
     responseString = create_response( request, response );
+    fprintf(stdout,"DEBUG: response %s\r\n",responseString);
     purge_request( request );
 
     return responseString;
@@ -88,6 +91,7 @@ error:
 
 cJSON* opcua_client_connect(cJSON* request){
     char *error = NULL;
+    fprintf(stdout,"DEBUG: connecting\r\n");
     cJSON *response = cJSON_CreateString("TODO: connect");
     if (response == NULL){
         goto error;
@@ -105,6 +109,7 @@ error:
 
 cJSON* opcua_client_read(cJSON* request){
     char *error = NULL;
+    fprintf(stdout,"DEBUG: reading\r\n");
     cJSON *response = cJSON_CreateString("TODO: read");
     if (response == NULL){
         goto error;

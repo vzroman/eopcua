@@ -1,4 +1,23 @@
+%%----------------------------------------------------------------
+%% Copyright (c) 2021 Faceplate
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%----------------------------------------------------------------
 -module(eopcua).
+
+-include("eopcua.hrl").
 
 %%==============================================================================
 %%	Control API
@@ -12,11 +31,14 @@
 %%	Protocol API
 %%==============================================================================
 -export([
-    read_value/2
+    connect/3,connect/4,
+    read/2,read/3
 ]).
 
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
+
+-define(HEADER_LENGTH,4).
 
 %%==============================================================================
 %%	Control API
@@ -41,17 +63,42 @@ stop(PID) ->
 %%==============================================================================
 %%	Protocol API
 %%==============================================================================
-read_value(PID, Node)->
-    read_value(PID,Node,?RESPONSE_TIMEOUT).
-read_value(PID, Node, Timeout)->
-    call_ext( PID, {read_value, Node}, Timeout ).
+connect(PID, Host, Port)->
+    connect(PID, Host, Port,?RESPONSE_TIMEOUT).
+connect(PID, Host, Port, Timeout)->
+    Request = #{
+        host => Host,
+        port => Port
+    },
+    transaction( PID, <<"connect">>, Request, Timeout ).   
 
-call_ext( PID, Msg, Timeout )->
-    PID ! { self(), call, Msg, Timeout },
+read(PID, Nodes)->
+    read(PID,Nodes,?RESPONSE_TIMEOUT).
+read(PID, Nodes, Timeout)->
+    transaction( PID, <<"read">>, Nodes, Timeout ).
+
+transaction( PID, Command, Body, Timeout )->
+    TID = rand:uniform(16#FFFF),
+    Request = #{
+        <<"cmd">> => Command,
+        <<"tid">> => rand:uniform(16#FFFF),
+        <<"body">> => Body
+    },
+    PID ! { self(), call, jsx:encode(Request), Timeout },
+    wait_for_reply( PID, Command, TID, Timeout ).
+
+wait_for_reply( PID, Command, TID, Timeout )->
     receive
-        {PID, reply, Result }-> Result
+        {PID, reply, Result }-> 
+            case try jsx:decode(Result, [return_maps]) catch _:_->{invalid_json, Result } end of
+                #{ <<"cmd">> := Command, <<"tid">> := TID, <<"reply">> := Reply }-> 
+                    {ok, Reply};
+                Unexpected->
+                    ?LOGWARNING("unexpected reply from the port ~p",[Unexpected]),
+                    wait_for_reply( PID, Command, TID, Timeout )
+            end       
     after
-        Timeout-> {error,timeout}
+        Timeout-> {error, timeout}
     end.    
 %%==============================================================================
 %%	Initialization procedure
@@ -60,14 +107,8 @@ init( Name, Owner, Options ) ->
     process_flag(trap_exit, true),
     case init_ext_programm( Name ) of
         {ok,Port}->
-            case connect(Port, Name, Options) of
-                ok->
-                    Owner ! {self(),connected},
-                    loop(Port, Owner, Options);
-                ConnectError->
-                    port_close(Port),
-                    Owner ! ConnectError
-            end;    
+            Owner ! {self(),connected},
+            loop(Port, Owner, Options);    
         InitError->
             Owner ! InitError
     end.
@@ -75,27 +116,11 @@ init( Name, Owner, Options ) ->
 init_ext_programm( Name )->
     try 
         Program = create_program_file( Name ),
-        Port = open_port({spawn, Program}, [{packet, 2}, binary, nouse_stdio]),
+        Port = open_port({spawn, Program}, [{packet, ?HEADER_LENGTH}, binary, nouse_stdio]),
         {ok,Port}
     catch
         _:Error->{error,Error}
     end.
-
-connect(Port, Name, #{timeout := Timeout})->
-    Port ! {self(), {command, encode({connect,Name})}},
-    receive
-		{Port, {data, Data}} ->
-		    case decode(Data) of
-                connected-> ok;
-                Error-> Error
-            end;
-        {'EXIT', Port, Reason} ->
-	        {error,{port_terminated,Reason}}
-    after
-        Timeout ->
-            {error,connect_timeout}
-
-	end.
 
 %%==============================================================================
 %%	THE LOOP
@@ -106,8 +131,8 @@ loop( Port, Owner, Options ) ->
             Result = call( Port, Msg, Options, Timeout ),
             From ! {self(), reply, Result},  
             loop(Port,Owner,Options);
-        {Port, {data, Data}}->
-            notify( Owner, Data, Options ),
+        {Port, {data, _Data}}->
+            ?LOGWARNING("unexpected data is received from the port"),
             loop(Port, Owner, Options);
         { Owner, stop } ->
             Port ! {self(), close},
@@ -125,27 +150,15 @@ loop( Port, Owner, Options ) ->
     end.
 
 call( Port, Msg, _Options, Timeout )->
-    Port ! {self(), {command, encode(Msg)}},
+    ?LOGINFO("send command ~p",[Msg]),
+    Port ! {self(), {command, Msg}},
     receive
         {Port, {data, Data}} ->
-            {ok, decode(Data) }
+            ?LOGINFO("received data ~p",[Msg]),
+            {ok, Data }
     after
         Timeout-> {error, timeout}
     end.
-
-notify( Owner, Data, _Options )->
-    case decode( Data ) of
-        { notify, Msg }-> Owner ! { notify, Msg };
-        _Unexpected->
-            % TODO. Log it
-            ignore
-    end.
-
-
-encode(Message)->
-    term_to_binary(Message).
-decode(Message)->
-    binary_to_term(Message).
 
 %%---------Internal helpers----------------------
 create_program_file( Name )->
