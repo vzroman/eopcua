@@ -31,6 +31,9 @@ cJSON* on_ok(cJSON* response);
 cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
 
+UA_StatusCode path2nodeId( char *path, UA_NodeId *result );
+int split_path( char *path, char **pathItems );
+
 // Global variables
 UA_Client *opcua_client;
 
@@ -135,8 +138,24 @@ error:
 }
 
 cJSON* opcua_client_read(cJSON* request){
-    char *error = NULL;
+    char *errorString = NULL;
     fprintf(stdout,"DEBUG: reading\r\n");
+
+    // char *paths[3];
+    // paths[0] = "Server"; paths[1] = "ServerStatus"; paths[2] = "State";
+
+    fprintf(stdout,"DEBUG: get node id\r\n");
+    UA_NodeId nodeId;
+    int retval =  path2nodeId( "Server/ServerStatus/State", &nodeId );
+
+    if (retval == 0){
+        fprintf(stdout,"DEBUG: invalid node path\r\n");
+        errorString = "invalid node path";
+        goto error;
+    }
+    fprintf(stdout,"DEBUG: node ns %d\r\n", nodeId.namespaceIndex);
+    //retval = UA_Client_readValueAttribute(client, UA_NODEID_STRING(1, "the.answer"), val);
+
     cJSON *response = cJSON_CreateString("TODO: read");
     if (response == NULL){
         goto error;
@@ -145,10 +164,108 @@ cJSON* opcua_client_read(cJSON* request){
 
 error:
     cJSON_Delete( response );
-    if (error == NULL){
-        error = "programming error in opcua_client_read";
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_read";
     }
-    return on_error( error );
+    return on_error( errorString );
+}
+
+UA_StatusCode path2nodeId( char *path, UA_NodeId *result ){
+    UA_StatusCode retval = UA_STATUSCODE_GOOD;
+
+    char **pathItems = NULL;
+    fprintf(stdout,"DEBUG: splitting path\r\n");
+    int BROWSE_PATHS_SIZE = split_path( path, pathItems );
+    if (BROWSE_PATHS_SIZE == -1){
+        fprintf(stdout,"ERROR: invalid path\r\n");
+        return UA_STATUSCODE_BADBROWSENAMEINVALID;
+    }
+
+    fprintf(stdout,"DEBUG: BROWSE_PATHS_SIZE %d\r\n",BROWSE_PATHS_SIZE);
+
+    UA_UInt32 ids[BROWSE_PATHS_SIZE];
+    ids[0] = UA_NS0ID_ORGANIZES; ids[1] = UA_NS0ID_HASCOMPONENT; ids[2] = UA_NS0ID_HASCOMPONENT;
+
+    UA_BrowsePath browsePath;
+    UA_BrowsePath_init(&browsePath);
+    browsePath.startingNode = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    browsePath.relativePath.elements = (UA_RelativePathElement*)UA_Array_new(BROWSE_PATHS_SIZE, &UA_TYPES[UA_TYPES_RELATIVEPATHELEMENT]);
+    browsePath.relativePath.elementsSize = BROWSE_PATHS_SIZE;
+
+    for(int i = 0; i < BROWSE_PATHS_SIZE; i++) {
+        UA_RelativePathElement *elem = &browsePath.relativePath.elements[i];
+        elem->referenceTypeId = UA_NODEID_NUMERIC(0, ids[i]);
+        elem->targetName = UA_QUALIFIEDNAME_ALLOC(0, pathItems[i]);
+        fprintf(stdout,"DEBUG: paths[%d] = %s\r\n",i,pathItems[i]);
+    }
+
+    UA_TranslateBrowsePathsToNodeIdsRequest request;
+    UA_TranslateBrowsePathsToNodeIdsRequest_init(&request);
+    request.browsePaths = &browsePath;
+    request.browsePathsSize = 1;
+
+    UA_TranslateBrowsePathsToNodeIdsResponse response = UA_Client_Service_translateBrowsePathsToNodeIds(opcua_client, request);
+    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+        fprintf(stdout,"ERROR: UA_Client_Service_translateBrowsePathsToNodeIds error\r\n");
+        retval = response.responseHeader.serviceResult;
+        goto error;
+    }
+    if (response.resultsSize < 1){
+        fprintf(stdout,"ERROR: UA_Client_Service_translateBrowsePathsToNodeIds no results found\r\n");
+        goto error;
+    }
+    if (response.results[0].targetsSize < 1){
+        fprintf(stdout,"ERROR: UA_Client_Service_translateBrowsePathsToNodeIds no targets found\r\n");
+        goto error;
+    }
+
+    retval = UA_NodeId_copy(&response.results[0].targets[0].targetId.nodeId, result);
+
+    free(pathItems);
+    UA_clear(&browsePath, &UA_TYPES[UA_TYPES_BROWSEPATH]);
+    UA_clear(&response, &UA_TYPES[UA_TYPES_TRANSLATEBROWSEPATHSTONODEIDSRESPONSE]);
+    
+    return retval;
+
+error:
+    free(pathItems);
+    UA_clear(&browsePath, &UA_TYPES[UA_TYPES_BROWSEPATH]);
+    UA_clear(&response, &UA_TYPES[UA_TYPES_TRANSLATEBROWSEPATHSTONODEIDSRESPONSE]);
+
+    return retval;
+
+}
+
+int split_path( char *path, char **pathItems ){
+    char delimiter[2] = "/";
+    fprintf(stdout,"DEBUG: stroke before %s\r\n",path);
+    char *p = strtok(path,delimiter);
+    fprintf(stdout,"DEBUG: stroke 0\r\n");
+
+    int i = 0;
+
+    while (p) {
+        pathItems = realloc (pathItems, sizeof (char*) * ++i);
+
+        fprintf(stdout,"DEBUG: split %d: %s\r\n",i,p);
+
+        if (pathItems == NULL){
+            fprintf(stdout,"ERROR: split_path memory allocation failure\r\n");
+            exit(EXIT_FAILURE);
+        }
+
+        pathItems[i-1] = p;
+        p = strtok(NULL, delimiter);
+    }
+    if ( i == 0 ){
+        return -1;
+    }
+
+    /* realloc one extra element for the last NULL */
+    pathItems = realloc (pathItems, sizeof (char*) * (i+1));
+    pathItems[i] = 0;
+
+    return i;
 }
 
 // #ifdef UA_ENABLE_SUBSCRIPTIONS
