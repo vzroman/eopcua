@@ -19,10 +19,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-// #include <open62541/client_config_default.h>
-// #include <open62541/client_highlevel.h>
-// #include <open62541/client_subscriptions.h>
-// #include <open62541/plugin/log_stdout.h>
+#include <open62541/client_config_default.h>
+#include <open62541/client_highlevel.h>
+#include <open62541/client_subscriptions.h>
+#include <open62541/plugin/log_stdout.h>
 #include "opcua_client.h"
 #include "opcua_client_protocol.h"
  
@@ -30,6 +30,9 @@ cJSON* on_error(char* text);
 cJSON* on_ok(cJSON* response);
 cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
+
+// Global variables
+UA_Client *opcua_client;
 
 char* on_request( char *requestString ){
     cJSON *response;
@@ -90,21 +93,45 @@ error:
 }
 
 cJSON* opcua_client_connect(cJSON* request){
-    char *error = NULL;
-    fprintf(stdout,"DEBUG: connecting\r\n");
-    cJSON *response = cJSON_CreateString("TODO: connect");
+    char *errorString = NULL;
+    UA_StatusCode retval;
+
+    // Connection params
+    cJSON *url = cJSON_GetObjectItemCaseSensitive(request, "url");
+    cJSON *login = cJSON_GetObjectItemCaseSensitive(request, "login");
+    cJSON *password = cJSON_GetObjectItemCaseSensitive(request, "password");
+    if (!cJSON_IsString(login) || (login->valuestring == NULL)){
+        login = NULL;
+        password = NULL; 
+    }
+
+    if (login != NULL && password != NULL){
+        // Authorized access
+        fprintf(stdout,"connecting to %s, user %s\r\n", url->valuestring,login->valuestring);
+        retval = UA_Client_connectUsername(opcua_client, url->valuestring, login->valuestring, password->valuestring);
+    }else{
+        fprintf(stdout,"connecting to %s\r\n", url->valuestring);
+        retval = UA_Client_connect(opcua_client, url->valuestring);
+    }
+
+    if(retval != UA_STATUSCODE_GOOD) {
+        errorString = "connection error";
+        goto error;
+    }
+
+    cJSON *response = cJSON_CreateString("ok");
     if (response == NULL){
         goto error;
     }
 
-    return response;
+    return on_ok( response );
 
 error:
     cJSON_Delete( response );
-    if (error == NULL){
-        error = "programming error in opcua_client_connect";
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_connect";
     }
-    return on_error( error );
+    return on_error( errorString );
 }
 
 cJSON* opcua_client_read(cJSON* request){
@@ -145,6 +172,13 @@ error:
 // }
 
 int main(int argc, char *argv[]) {
+    // Create an object
+    opcua_client = UA_Client_new();
+    if (opcua_client == NULL){
+        fprintf(stdout,"unable to initialize the connection object\r\n");
+        exit(EXIT_FAILURE);
+    }
+    UA_ClientConfig_setDefault(UA_Client_getConfig(opcua_client));
 
     printf("enter eport_loop\r\n");
     eport_loop( &on_request );

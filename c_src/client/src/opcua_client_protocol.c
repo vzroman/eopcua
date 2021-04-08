@@ -174,10 +174,22 @@ char* cmd2string(OPCUA_CLIENT_CMD cmd){
     }
 }
 
+// The expected structure is:
+//     {
+//         "host": "localhost",
+//         "port": 4841,
+//         ----optional---------
+//         "endpoint": "OPCUA/SimulationServer",
+//         "login":"user1",
+//         "password":"secret"
+//     }
 cJSON* parse_connect_request( cJSON *inBody ){
     cJSON *request = NULL;
     cJSON *host = NULL;
+    cJSON *endpoint = NULL;
     cJSON *port = NULL;
+    cJSON *login = NULL;
+    cJSON *password = NULL;
     char *connectonString = NULL;
 
     if ( !cJSON_IsObject(inBody) ) {
@@ -199,19 +211,80 @@ cJSON* parse_connect_request( cJSON *inBody ){
         goto error; 
     }
 
-    // Building the request body structure (6 in tail is :<port> as port max string length is 5)
+    // Parse host
+    endpoint = cJSON_GetObjectItemCaseSensitive(inBody, "endpoint");
+    if (!cJSON_IsString(host) || (host->valuestring == NULL)){
+        endpoint = NULL;
+    }
+
+    fprintf(stdout,"DEBUG: parsing login/passowrd\r\n");
+
+    // Parse login (optional)
+    login = cJSON_GetObjectItemCaseSensitive(inBody, "login");
+    if (cJSON_IsString(login) && (login->valuestring != NULL)){
+        // If the login is provided then the password is required
+        password = cJSON_GetObjectItemCaseSensitive(inBody, "password");
+        if (!cJSON_IsString(password) || (password->valuestring == NULL)){
+            fprintf(stdout,"password is not defined\r\n");
+            goto error; 
+        }
+    }else{
+        login = NULL;
+    }
+
+    // Building the connection string (6 in tail is :<port> as port max string length is 5)
     char *prefix = "opc.tcp://";
-    connectonString = malloc( strlen(prefix) + strlen(host->valuestring) + 6 ); // :65535 is max
-    sprintf(connectonString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
-    request = cJSON_CreateString( connectonString );
+    int urlLen = strlen(prefix) + strlen(host->valuestring) + 6; // :65535 is max
+    if (endpoint != NULL){
+        urlLen += strlen( endpoint->valuestring );
+    }
+    fprintf(stdout,"DEBUG: urlLen %d\r\n",urlLen);
+
+    connectonString = malloc( urlLen );
+    if (endpoint != NULL){
+        sprintf(connectonString, "%s%s:%d/%s", prefix, host->valuestring, (int)port->valuedouble, endpoint->valuestring);
+    }else{
+        sprintf(connectonString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
+    }
+    fprintf(stdout,"DEBUG: url %s\r\n",connectonString);
+
+
+    // Build the request structure
+    request = cJSON_CreateObject();
+    if (request == NULL){
+        fprintf(stdout,"unable to alocate the request object\r\n");
+        goto error; 
+    }
+    if (cJSON_AddStringToObject(request, "url", connectonString) == NULL) {
+        fprintf(stdout,"unable to add the url to the request object\r\n");
+        goto error; 
+    }
     free(connectonString);
+
+    if (login != NULL && password != NULL){
+        if (cJSON_AddStringToObject(request, "login", login->valuestring) == NULL) {
+            fprintf(stdout,"unable to add the login to the request object\r\n");
+            goto error; 
+        }
+         if (cJSON_AddStringToObject(request, "password", password->valuestring) == NULL) {
+            fprintf(stdout,"unable to add the password to the request object\r\n");
+            goto error; 
+        }
+    }
+
+    fprintf(stdout,"DEBUG: return parsed connect request\r\n");
     
     return request;
 
 error:
+    if (connectonString != NULL){
+        free(connectonString);
+    }
     cJSON_Delete( request );
     cJSON_Delete( host );
     cJSON_Delete( port );
+    cJSON_Delete( login );
+    cJSON_Delete( password );
     return NULL;
 }
 

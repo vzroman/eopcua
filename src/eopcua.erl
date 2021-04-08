@@ -31,7 +31,7 @@
 %%	Protocol API
 %%==============================================================================
 -export([
-    connect/3,connect/4,
+    connect/2,connect/3,
     read/2,read/3
 ]).
 
@@ -63,14 +63,19 @@ stop(PID) ->
 %%==============================================================================
 %%	Protocol API
 %%==============================================================================
-connect(PID, Host, Port)->
-    connect(PID, Host, Port,?RESPONSE_TIMEOUT).
-connect(PID, Host, Port, Timeout)->
-    Request = #{
-        host => Host,
-        port => Port
-    },
-    transaction( PID, <<"connect">>, Request, Timeout ).   
+% Params example:
+%     {
+%         host => <<"localhost">>,
+%         port => 4841,
+%         ----optional---------
+%         endpoint => <<"OPCUA/SimulationServer">>,
+%         login => <<"user1">>,
+%         password => <<"secret">>
+%     }
+connect(PID, Params)->
+    connect(PID, Params,?RESPONSE_TIMEOUT).
+connect(PID, Params, Timeout)->
+    transaction( PID, <<"connect">>, Params, Timeout ).   
 
 read(PID, Nodes)->
     read(PID,Nodes,?RESPONSE_TIMEOUT).
@@ -92,7 +97,14 @@ wait_for_reply( PID, Command, TID, Timeout )->
         {PID, reply, {ok, Result} }-> 
             case try jsx:decode(Result, [return_maps]) catch _:_->{invalid_json, Result } end of
                 #{<<"cmd">> := Command, <<"tid">> := TID, <<"reply">> := Reply}-> 
-                    {ok, Reply};
+                    case Reply of
+                        #{<<"type">> := <<"ok">>, <<"result">> := CmdResult}->
+                            {ok, CmdResult};
+                        #{<<"type">> := <<"error">>, <<"text">> := Error}->
+                            {error, Error};
+                        Unexpected->
+                            {error, {unexpected_port_reply, Unexpected} }
+                    end;
                 Unexpected->
                     io:format("unexpected reply from the port ~p\r\n",[Unexpected]),
                     ?LOGWARNING("unexpected reply from the port ~p",[Unexpected]),
