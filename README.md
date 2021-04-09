@@ -15,6 +15,6 @@ Example
     
     {ok,<<"ok">>} = eopcua:connect(Port, #{ host=> <<"localhost">>, port => 4841, endpoint => <<"OPCUA/SimulationServer">> }).
     
-    {ok,Value} = eopcua:read(Port, [ <<"Server/ServerStatus/State">> ]).
+    {ok,Value} = eopcua:read(Port, [ <<"Server">>,<<"ServerStatus">>,<<"State">> ]).
     
     
