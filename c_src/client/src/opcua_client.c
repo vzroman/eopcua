@@ -31,8 +31,8 @@ cJSON* on_ok(cJSON* response);
 cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
 
-UA_StatusCode path2nodeId( char *path, UA_NodeId *result );
-int split_path( char *path, char **pathItems );
+int path2nodeId( cJSON *path, UA_NodeId *node );
+cJSON* browse_folder( UA_NodeId folder );
 
 // Global variables
 UA_Client *opcua_client;
@@ -141,19 +141,14 @@ cJSON* opcua_client_read(cJSON* request){
     char *errorString = NULL;
     fprintf(stdout,"DEBUG: reading\r\n");
 
-    // char *paths[3];
-    // paths[0] = "Server"; paths[1] = "ServerStatus"; paths[2] = "State";
+    UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    int ret = path2nodeId( request, &nodeId );
 
-    fprintf(stdout,"DEBUG: get node id\r\n");
-    UA_NodeId nodeId;
-    int retval =  path2nodeId( "Server/ServerStatus/State", &nodeId );
-
-    if (retval == 0){
-        fprintf(stdout,"DEBUG: invalid node path\r\n");
+    if (ret != 0){
         errorString = "invalid node path";
         goto error;
     }
-    fprintf(stdout,"DEBUG: node ns %d\r\n", nodeId.namespaceIndex);
+
     //retval = UA_Client_readValueAttribute(client, UA_NODEID_STRING(1, "the.answer"), val);
 
     cJSON *response = cJSON_CreateString("TODO: read");
@@ -170,102 +165,91 @@ error:
     return on_error( errorString );
 }
 
-UA_StatusCode path2nodeId( char *path, UA_NodeId *result ){
-    UA_StatusCode retval = UA_STATUSCODE_GOOD;
+int path2nodeId( cJSON *path, UA_NodeId *node ){
+    cJSON *level = NULL;
+    cJSON *content = NULL;
+    cJSON *next = NULL;
 
-    char **pathItems = NULL;
-    fprintf(stdout,"DEBUG: splitting path\r\n");
-    int BROWSE_PATHS_SIZE = split_path( path, pathItems );
-    if (BROWSE_PATHS_SIZE == -1){
-        fprintf(stdout,"ERROR: invalid path\r\n");
-        return UA_STATUSCODE_BADBROWSENAMEINVALID;
-    }
-
-    fprintf(stdout,"DEBUG: BROWSE_PATHS_SIZE %d\r\n",BROWSE_PATHS_SIZE);
-
-    UA_UInt32 ids[BROWSE_PATHS_SIZE];
-    ids[0] = UA_NS0ID_ORGANIZES; ids[1] = UA_NS0ID_HASCOMPONENT; ids[2] = UA_NS0ID_HASCOMPONENT;
-
-    UA_BrowsePath browsePath;
-    UA_BrowsePath_init(&browsePath);
-    browsePath.startingNode = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-    browsePath.relativePath.elements = (UA_RelativePathElement*)UA_Array_new(BROWSE_PATHS_SIZE, &UA_TYPES[UA_TYPES_RELATIVEPATHELEMENT]);
-    browsePath.relativePath.elementsSize = BROWSE_PATHS_SIZE;
-
-    for(int i = 0; i < BROWSE_PATHS_SIZE; i++) {
-        UA_RelativePathElement *elem = &browsePath.relativePath.elements[i];
-        elem->referenceTypeId = UA_NODEID_NUMERIC(0, ids[i]);
-        elem->targetName = UA_QUALIFIEDNAME_ALLOC(0, pathItems[i]);
-        fprintf(stdout,"DEBUG: paths[%d] = %s\r\n",i,pathItems[i]);
-    }
-
-    UA_TranslateBrowsePathsToNodeIdsRequest request;
-    UA_TranslateBrowsePathsToNodeIdsRequest_init(&request);
-    request.browsePaths = &browsePath;
-    request.browsePathsSize = 1;
-
-    UA_TranslateBrowsePathsToNodeIdsResponse response = UA_Client_Service_translateBrowsePathsToNodeIds(opcua_client, request);
-    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        fprintf(stdout,"ERROR: UA_Client_Service_translateBrowsePathsToNodeIds error\r\n");
-        retval = response.responseHeader.serviceResult;
-        goto error;
-    }
-    if (response.resultsSize < 1){
-        fprintf(stdout,"ERROR: UA_Client_Service_translateBrowsePathsToNodeIds no results found\r\n");
-        goto error;
-    }
-    if (response.results[0].targetsSize < 1){
-        fprintf(stdout,"ERROR: UA_Client_Service_translateBrowsePathsToNodeIds no targets found\r\n");
-        goto error;
-    }
-
-    retval = UA_NodeId_copy(&response.results[0].targets[0].targetId.nodeId, result);
-
-    free(pathItems);
-    UA_clear(&browsePath, &UA_TYPES[UA_TYPES_BROWSEPATH]);
-    UA_clear(&response, &UA_TYPES[UA_TYPES_TRANSLATEBROWSEPATHSTONODEIDSRESPONSE]);
-    
-    return retval;
-
-error:
-    free(pathItems);
-    UA_clear(&browsePath, &UA_TYPES[UA_TYPES_BROWSEPATH]);
-    UA_clear(&response, &UA_TYPES[UA_TYPES_TRANSLATEBROWSEPATHSTONODEIDSRESPONSE]);
-
-    return retval;
-
-}
-
-int split_path( char *path, char **pathItems ){
-    char delimiter[2] = "/";
-    fprintf(stdout,"DEBUG: stroke before %s\r\n",path);
-    char *p = strtok(path,delimiter);
-    fprintf(stdout,"DEBUG: stroke 0\r\n");
-
-    int i = 0;
-
-    while (p) {
-        pathItems = realloc (pathItems, sizeof (char*) * ++i);
-
-        fprintf(stdout,"DEBUG: split %d: %s\r\n",i,p);
-
-        if (pathItems == NULL){
-            fprintf(stdout,"ERROR: split_path memory allocation failure\r\n");
-            exit(EXIT_FAILURE);
+    // Start from the Objects folder
+    cJSON_ArrayForEach(level, path) {
+        content = browse_folder( *node );
+        if (content == NULL){
+            fprintf(stdout,"ERROR: path2nodeId unable to browse folder\r\n");
+            goto error;
         }
 
-        pathItems[i-1] = p;
-        p = strtok(NULL, delimiter);
-    }
-    if ( i == 0 ){
-        return -1;
+        // Lookup node by name
+        next = cJSON_GetObjectItemCaseSensitive(content, level->valuestring );
+        if (!cJSON_IsString(next) || (next->valuestring == NULL)){
+            fprintf(stdout,"ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
+            goto error;
+        }
+
+        if (UA_NodeId_parse(node, UA_STRING((char*)(uintptr_t)next->valuestring)) != UA_STATUSCODE_GOOD){
+            fprintf(stdout,"ERROR: path2nodeId unable to parse nodeId %s\r\n",next->valuestring);
+            goto error;
+        }
+        cJSON_Delete( content );
     }
 
-    /* realloc one extra element for the last NULL */
-    pathItems = realloc (pathItems, sizeof (char*) * (i+1));
-    pathItems[i] = 0;
+    return 0;
 
-    return i;
+error:
+    cJSON_Delete( content );
+    return -1;
+}
+
+cJSON* browse_folder( UA_NodeId folder ){
+    cJSON *result = NULL;
+    UA_String nodeId;
+
+    // Build the request
+    UA_BrowseRequest request;
+    UA_BrowseRequest_init(&request);
+    request.requestedMaxReferencesPerNode = 0;
+    request.nodesToBrowse = UA_BrowseDescription_new();
+    request.nodesToBrowseSize = 1;
+    request.nodesToBrowse[0].nodeId = folder; 
+    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_ALL;
+
+    // Execute the request
+    UA_BrowseResponse response = UA_Client_Service_browse(opcua_client, request);
+    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+        fprintf(stdout,"ERROR: UA_Client_Service_browse error\r\n");
+        goto error;
+    }
+
+    // Build the result
+    result = cJSON_CreateObject();
+    for(size_t i = 0; i < response.resultsSize; ++i) {
+        for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
+
+            UA_ReferenceDescription *ref = &(response.results[i].references[j]);
+
+            // Convert the nodeId to string
+            if (UA_NodeId_print(&ref->nodeId.nodeId, &nodeId) != UA_STATUSCODE_GOOD){
+                fprintf(stdout,"ERROR: unable to serialize nodeId in browse_folder\r\n");
+                goto error; 
+            }
+            
+            if (cJSON_AddStringToObject(result, (char *)ref->displayName.text.data, (char *)nodeId.data) == NULL) {
+                fprintf(stdout,"ERROR: unable to add a node the result in browse_folder\r\n");
+                UA_String_clear(&nodeId);
+                goto error; 
+            }
+            UA_String_clear(&nodeId);
+        }
+    }
+    UA_BrowseRequest_clear(&request);
+    UA_BrowseResponse_clear(&response);
+
+    return result;
+
+error:
+    cJSON_Delete( result );
+    UA_BrowseRequest_clear(&request);
+    UA_BrowseResponse_clear(&response);
+    return NULL;
 }
 
 // #ifdef UA_ENABLE_SUBSCRIPTIONS
