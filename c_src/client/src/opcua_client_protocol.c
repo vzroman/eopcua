@@ -331,7 +331,6 @@ error:
     return NULL;
 }
 
-// eopcua:write(Port, [ <<"StaticData">>,<<"StaticVariables">>,<<"String">> ], <<"new value">>).
 cJSON* parse_write_request( cJSON *inBody ){
     cJSON *request = NULL;
 
