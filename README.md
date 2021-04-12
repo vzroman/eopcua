@@ -17,6 +17,6 @@ Example
     
     {ok,Value} = eopcua:read(Port, [ <<"Server">>,<<"ServerStatus">>,<<"State">> ]).
     
-    {ok,<<"ok">>} = eopcua:write(Port, [ <<"StaticData">>,<<"AnalogItems">>,<<"Int32AnalogItem">> ]).
+    {ok,<<"ok">>} = eopcua:write(Port, [ <<"StaticData">>,<<"AnalogItems">>,<<"Int32AnalogItem">> ], 34).
     
     
