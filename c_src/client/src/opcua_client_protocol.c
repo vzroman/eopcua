@@ -23,6 +23,7 @@
 
 cJSON* parse_connect_request( cJSON *body );
 cJSON* parse_read_request( cJSON *body );
+cJSON* parse_write_request( cJSON *body );
 OPCUA_CLIENT_CMD string2cmd(char *cmd);
 char* cmd2string(OPCUA_CLIENT_CMD cmd);
 
@@ -60,7 +61,6 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
         fprintf(stdout,"invalid request format: command type is not defined\r\n");
         goto error;
     }
-    
 
     // Parse transaction ID
     fprintf(stdout,"DEBUG: parse tid\r\n");
@@ -81,11 +81,15 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     } else if( request->cmd == OPCUA_CLIENT_READ ){
         fprintf(stdout,"DEBUG: parse read body\r\n");
         request->body = parse_read_request( request->body );
+    }else if( request->cmd == OPCUA_CLIENT_WRITE ){
+        fprintf(stdout,"DEBUG: parse write body\r\n");
+        request->body = parse_write_request( request->body );
     } else {
         fprintf(stdout,"invalid command type %d\r\n",request->cmd);
         goto error;
     }
     if (request->body == NULL){
+        fprintf(stdout,"unable to parse request body\r\n");
         goto error;
     }
 
@@ -138,9 +142,11 @@ char* create_response( OPCUA_CLIENT_REQUEST *request, cJSON *responseBody ){
         goto error;
     }
 
+    cJSON_Delete( response );
     return responseString;
 
 error:
+    cJSON_Delete( responseBody );
     cJSON_Delete( response );
     return "{\"type\":\"error\",\"text\":\"unable to construct the response\"}";
 }
@@ -294,7 +300,7 @@ cJSON* parse_read_request( cJSON *inBody ){
     cJSON *iter = NULL;
 
     if ( !cJSON_IsArray(inBody) ) {
-        fprintf(stdout,"invalid read parameters\r\n");
+        fprintf(stdout,"ERROR: invalid read parameters\r\n");
         goto error;
     }
 
@@ -302,16 +308,16 @@ cJSON* parse_read_request( cJSON *inBody ){
     request = cJSON_CreateArray();
     cJSON_ArrayForEach(item, inBody) {
         if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
-            fprintf(stdout,"invalid item to read\r\n");
+            fprintf(stdout,"ERROR: invalid item to read\r\n");
             goto error;
         }
         iter = cJSON_CreateString( item->valuestring );
         if (item == NULL){
-            fprintf(stdout,"error on creating an item %s for read collection\r\n", item->valuestring );
+            fprintf(stdout,"ERROR: unable to allocate an item %s for read collection\r\n", item->valuestring );
             goto error;
         }
         if ( !cJSON_AddItemToArray(request, iter) ) {
-            fprintf(stdout,"unable to add read item to array %s\r\n", item->valuestring);
+            fprintf(stdout,"ERROR: unable to add %s item to array\r\n", item->valuestring);
             goto error;
         }
 
@@ -322,5 +328,98 @@ cJSON* parse_read_request( cJSON *inBody ){
 error:
     cJSON_Delete( request );
     cJSON_Delete( item );
+    return NULL;
+}
+
+// eopcua:write(Port, [ <<"StaticData">>,<<"StaticVariables">>,<<"String">> ], <<"new value">>).
+cJSON* parse_write_request( cJSON *inBody ){
+    cJSON *request = NULL;
+
+    cJSON *in_tag = NULL;
+    cJSON *tag = NULL;
+
+    cJSON *in_value = NULL;
+    
+    cJSON *item = NULL;
+    cJSON *iter = NULL;
+
+    if ( !cJSON_IsObject(inBody) ) {
+        fprintf(stdout,"ERROR: invalid write parameters\r\n");
+        goto error;
+    }
+
+    in_tag = cJSON_GetObjectItemCaseSensitive(inBody, "tag");
+    if (!cJSON_IsArray(in_tag)) {
+        fprintf(stdout,"ERROR: invalid tag\r\n");
+        goto error;
+    }
+
+    // ------------Tag---------------------------------
+    tag = cJSON_CreateArray();
+    cJSON_ArrayForEach(item, in_tag) {
+        if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+            fprintf(stdout,"ERROR: invalid item to write\r\n");
+            goto error;
+        }
+        fprintf(stdout,"DEBUG: add %s to path\r\n",item->valuestring);
+        iter = cJSON_CreateString( item->valuestring );
+        if (item == NULL){
+            fprintf(stdout,"ERROR: unable to allocate an item %s for write collection\r\n", item->valuestring );
+            goto error;
+        }
+        if ( !cJSON_AddItemToArray(tag, iter) ) {
+            fprintf(stdout,"ERROR: unable to add an item %s to path\r\n", item->valuestring);
+            goto error;
+        }
+    }
+    request = cJSON_CreateObject();
+    if(request == NULL){
+        fprintf(stdout,"ERROR: unable to allocate the request object\r\n");
+        goto error;
+    }
+    fprintf(stdout,"DEBUG: add tag to request\r\n");
+    if (!cJSON_AddItemToObject(request,"tag",tag)){
+        fprintf(stdout,"ERROR: unable to add tag to write request\r\n");
+    }
+
+    // ---------value---------------------------------------
+    in_value = cJSON_GetObjectItemCaseSensitive(inBody, "value");
+    fprintf(stdout,"DEBUG: add value to request\r\n");
+    if (cJSON_IsString(in_value) && (in_value->valuestring != NULL)) {
+        if (!cJSON_AddStringToObject(request,"value",in_value->valuestring) ){
+            fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
+            goto error;
+        }
+    }else if(cJSON_IsNumber(in_value)){
+        if (!cJSON_AddNumberToObject(request,"value",in_value->valuedouble) ){
+            fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
+            goto error;
+        }
+    }else if( cJSON_IsBool(in_value)){
+        if (cJSON_IsFalse(in_value)){
+            if (!cJSON_AddNumberToObject(request,"value",0) ){
+                fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
+                goto error;
+            }
+        }else{
+            if (!cJSON_AddNumberToObject(request,"value",1) ){
+                fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
+                goto error;
+            }
+        }
+    }else{
+        fprintf(stdout,"ERROR: invalid value to write\r\n");
+        goto error;
+    }
+
+    fprintf(stdout,"DEBUG: return parsed write request\r\n");
+    return request;
+
+error:
+    if (request != NULL){
+        cJSON_Delete( request );
+    }else{
+        cJSON_Delete( tag );
+    }
     return NULL;
 }

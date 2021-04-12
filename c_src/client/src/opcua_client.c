@@ -30,10 +30,12 @@ cJSON* on_error(char* text);
 cJSON* on_ok(cJSON* response);
 cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
+cJSON* opcua_client_write(cJSON* request);
 
 int path2nodeId( cJSON *path, UA_NodeId *node );
 cJSON* browse_folder( UA_NodeId folder );
 cJSON* parse_value( UA_Variant *value );
+int export_value(UA_Variant *ua_value, cJSON *value);
 
 // Global variables
 UA_Client *opcua_client;
@@ -54,14 +56,17 @@ char* on_request( char *requestString ){
         response = opcua_client_connect( request->body );
     } else if (request->cmd == OPCUA_CLIENT_READ ){
         response = opcua_client_read( request->body );
+    } else if (request->cmd == OPCUA_CLIENT_WRITE ){
+        response = opcua_client_write( request->body );
     } else{
         response = on_error("unsupported command type");
     }
 
-    // Reply
+    // Reply (purges the response)
     responseString = create_response( request, response );
-    fprintf(stdout,"DEBUG: response %s\r\n",responseString);
+
     purge_request( request );
+    fprintf(stdout,"DEBUG: response %s\r\n",responseString);
 
     return responseString;
 }
@@ -146,13 +151,12 @@ cJSON* opcua_client_read(cJSON* request){
 
     UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
     int ret = path2nodeId( request, &nodeId );
-
     if (ret != 0){
         errorString = "invalid node path";
         goto error;
     }
 
-    /* Read attribute */
+    /* Read the value */
     if (UA_Client_readValueAttribute(opcua_client, nodeId, value) != UA_STATUSCODE_GOOD ) {
         fprintf(stdout,"ERROR: unable to read tag value\r\n");
         errorString = "unable to read value";
@@ -171,6 +175,55 @@ error:
     cJSON_Delete( response );
     if (errorString == NULL){
         errorString = "programming error in opcua_client_read";
+    }
+    return on_error( errorString );
+}
+
+cJSON* opcua_client_write(cJSON* request){
+    char *errorString = NULL;
+    cJSON *response = NULL;
+    UA_Variant *ua_value = UA_Variant_new();
+    fprintf(stdout,"DEBUG: writing\r\n");
+
+    cJSON *tag = cJSON_GetObjectItemCaseSensitive(request, "tag");
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(request, "value");
+
+    // Get the type of the tag
+    UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    int ret = path2nodeId( tag, &nodeId );
+    if (ret != 0){
+        errorString = "invalid node path";
+        goto error;
+    }
+    if (UA_Client_readValueAttribute(opcua_client, nodeId, ua_value) != UA_STATUSCODE_GOOD ) {
+        errorString = "unable to define tag type";
+        goto error;
+    }
+    if ( export_value(ua_value, value) != 0 ){
+        errorString = "invalid value";
+        goto error;
+    }
+
+    // Write the value
+    if ( UA_Client_writeValueAttribute(opcua_client, nodeId, ua_value) != UA_STATUSCODE_GOOD ){
+        errorString = "unable to write value";
+        goto error;
+    }
+
+    response = cJSON_CreateString("ok");
+    if (response == NULL){
+        goto error;
+    }
+
+    UA_Variant_delete(ua_value);
+    
+    return on_ok( response );
+
+error:
+    UA_Variant_delete( ua_value );
+    cJSON_Delete( response );
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_write";
     }
     return on_error( errorString );
 }
@@ -292,6 +345,96 @@ cJSON* parse_value( UA_Variant *ua_value ){
     }
     // TODO. Support other types
     return value;
+}
+
+int export_value(UA_Variant *ua_value, cJSON *value){
+    int retval = -1;
+    if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_BOOLEAN]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_Boolean v = (value->valuedouble != 0) ;
+            if ( UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_BOOLEAN]) == UA_STATUSCODE_GOOD) {
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_SBYTE]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_SByte v = (UA_SByte)value->valuedouble;
+            if ( UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_SBYTE]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_BYTE]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_Byte v = (UA_Byte)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_BYTE]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_INT16]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_Int16 v = (UA_Int16)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_INT16]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_UINT16]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_UInt16 v = (UA_UInt16)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_UINT16]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_INT32]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_Int32 v = (UA_Int32)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_INT32]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_UINT32]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_UInt32 v = (UA_UInt32)value->valuedouble;
+            if ( UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_UINT32]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_INT64]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_Int64 v = (UA_Int64)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_INT64]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_UINT64]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_UInt64 v = (UA_UInt64)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_UINT64]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_FLOAT]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_Float v = (UA_Float)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_FLOAT]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_DOUBLE]) ){
+        if ( cJSON_IsBool(value) || cJSON_IsNumber(value) ) {
+            UA_Double v = (UA_Double)value->valuedouble;
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_DOUBLE]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }else if( UA_Variant_hasScalarType( ua_value, &UA_TYPES[UA_TYPES_STRING]) ){
+        if ( cJSON_IsString(value) && value->valuestring != NULL ) {
+            UA_String  v =  UA_STRING((char *)value->valuestring);
+            if (UA_Variant_setScalarCopy( ua_value, &v, &UA_TYPES[UA_TYPES_STRING]) == UA_STATUSCODE_GOOD){
+                retval = 0;
+            }
+        }
+    }
+    return retval;
 }
 
 // #ifdef UA_ENABLE_SUBSCRIPTIONS

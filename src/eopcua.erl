@@ -32,7 +32,8 @@
 %%==============================================================================
 -export([
     connect/2,connect/3,
-    read/2,read/3
+    read/2,read/3,
+    write/3,write/4
 ]).
 
 -define(CONNECT_TIMEOUT,30000).
@@ -81,6 +82,11 @@ read(PID, Nodes)->
     read(PID,Nodes,?RESPONSE_TIMEOUT).
 read(PID, Nodes, Timeout)->
     transaction( PID, <<"read">>, Nodes, Timeout ).
+
+write(PID, Node, Value)->
+    write(PID,Node, Value,?RESPONSE_TIMEOUT).
+write(PID, Node, Value, Timeout)->
+    transaction( PID, <<"write">>, #{ <<"tag">> => Node, <<"value">> => Value}, Timeout ).
 
 transaction( PID, Command, Body, Timeout )->
     TID = rand:uniform(16#FFFF),
