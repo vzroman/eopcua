@@ -13,7 +13,7 @@ Example
     
     {ok,Port} = eopcua:start_link(<<"my_connection">>).
     
-    {ok,EndpointList} = eopcua:browse_endpoints( #{ host=> <<"localhost">>, port => 4841 } ).
+    {ok,EndpointList} = eopcua:browse_endpoints(Port, #{ host=> <<"localhost">>, port => 4841 } ).
     
     {ok,<<"ok">>} = eopcua:connect(Port, #{ host=> <<"localhost">>, port => 4841, endpoint => <<"OPCUA/SimulationServer">> }).
     
