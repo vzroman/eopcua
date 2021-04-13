@@ -21,9 +21,10 @@
 #include <string.h>
 #include "opcua_client_protocol.h"
 
-cJSON* parse_connect_request( cJSON *body );
-cJSON* parse_read_request( cJSON *body );
-cJSON* parse_write_request( cJSON *body );
+int parse_connect_request( cJSON *body );
+int parse_read_request( cJSON *body );
+int parse_write_request( cJSON *body );
+int parse_browse_endpoints_request( cJSON *body );
 OPCUA_CLIENT_CMD string2cmd(char *cmd);
 char* cmd2string(OPCUA_CLIENT_CMD cmd);
 
@@ -77,13 +78,16 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     request->body = cJSON_GetObjectItemCaseSensitive(JSON, "body");
     if (request->cmd == OPCUA_CLIENT_CONNECT){
         fprintf(stdout,"DEBUG: parse connect body\r\n");
-        request->body = parse_connect_request( request->body );
+        if (parse_connect_request( request->body ) != 0){ goto error; }
     } else if( request->cmd == OPCUA_CLIENT_READ ){
         fprintf(stdout,"DEBUG: parse read body\r\n");
-        request->body = parse_read_request( request->body );
+        if (parse_read_request( request->body ) != 0) { goto error; }
     }else if( request->cmd == OPCUA_CLIENT_WRITE ){
         fprintf(stdout,"DEBUG: parse write body\r\n");
-        request->body = parse_write_request( request->body );
+        if (parse_write_request( request->body ) != 0){ goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
+        fprintf(stdout,"DEBUG: parse write body\r\n");
+        if (parse_browse_endpoints_request( request->body ) != 0){ goto error; }
     } else {
         fprintf(stdout,"invalid command type %d\r\n",request->cmd);
         goto error;
@@ -155,12 +159,16 @@ error:
 OPCUA_CLIENT_CMD string2cmd(char *cmd){
     if ( strcmp(cmd, "connect") == 0 ){
         return OPCUA_CLIENT_CONNECT;
-    }else if( strcmp(cmd, "close") == 0){
-        return OPCUA_CLIENT_CLOSE;
     }else if( strcmp(cmd, "read") == 0){
         return OPCUA_CLIENT_READ;
     }else if( strcmp(cmd, "write") == 0){
         return OPCUA_CLIENT_WRITE;
+    }else if( strcmp(cmd, "subscribe") == 0){
+        return OPCUA_CLIENT_SUBSCRIBE;
+    }else if( strcmp(cmd, "browse_endpoints") == 0){
+        return OPCUA_CLIENT_BROWSE_ENDPOINTS;
+    }else if( strcmp(cmd, "browse_folder") == 0){
+        return OPCUA_CLIENT_BROWSE_FOLDER;
     }else{
         return -1; 
     }
@@ -169,12 +177,16 @@ OPCUA_CLIENT_CMD string2cmd(char *cmd){
 char* cmd2string(OPCUA_CLIENT_CMD cmd){
     if ( cmd == OPCUA_CLIENT_CONNECT ){
         return "connect";
-    }else if( cmd == OPCUA_CLIENT_CLOSE ){
-        return "close";
     }else if( cmd == OPCUA_CLIENT_READ){
         return "read";
     }else if( cmd == OPCUA_CLIENT_WRITE){
         return "write";
+    }else if( cmd == OPCUA_CLIENT_SUBSCRIBE ){
+        return "subscribe";
+    }else if( cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
+        return "browse_endpoints";
+    }else if( cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
+        return "browse_folder";
     }else{
         return NULL; 
     }
@@ -189,36 +201,35 @@ char* cmd2string(OPCUA_CLIENT_CMD cmd){
 //         "login":"user1",
 //         "password":"secret"
 //     }
-cJSON* parse_connect_request( cJSON *inBody ){
-    cJSON *request = NULL;
+int parse_connect_request( cJSON *request ){
     cJSON *host = NULL;
     cJSON *endpoint = NULL;
     cJSON *port = NULL;
     cJSON *login = NULL;
     cJSON *password = NULL;
-    char *connectonString = NULL;
+    char *connectionString = NULL;
 
-    if ( !cJSON_IsObject(inBody) ) {
-        fprintf(stdout,"invalid connection parameters\r\n");
+    if ( !cJSON_IsObject(request) ) {
+        fprintf(stdout,"ERROR: invalid connection parameters\r\n");
         goto error;
     }
 
     // Parse host
-    host = cJSON_GetObjectItemCaseSensitive(inBody, "host");
+    host = cJSON_DetachItemFromObject(request, "host");
     if (!cJSON_IsString(host) || (host->valuestring == NULL)){
-        fprintf(stdout,"host is not defined\r\n");
+        fprintf(stdout,"ERROR: host is not defined\r\n");
         goto error; 
     }
 
     // Parse port
-    port = cJSON_GetObjectItemCaseSensitive(inBody, "port");
+    port = cJSON_DetachItemFromObject(request, "port");
     if (!cJSON_IsNumber(port)){
-        fprintf(stdout,"port is not defined\r\n");
+        fprintf(stdout,"ERROR: port is not defined\r\n");
         goto error; 
     }
 
     // Parse host
-    endpoint = cJSON_GetObjectItemCaseSensitive(inBody, "endpoint");
+    endpoint = cJSON_DetachItemFromObject(request, "endpoint");
     if (!cJSON_IsString(host) || (host->valuestring == NULL)){
         endpoint = NULL;
     }
@@ -226,185 +237,121 @@ cJSON* parse_connect_request( cJSON *inBody ){
     fprintf(stdout,"DEBUG: parsing login/passowrd\r\n");
 
     // Parse login (optional)
-    login = cJSON_GetObjectItemCaseSensitive(inBody, "login");
+    login = cJSON_GetObjectItemCaseSensitive(request, "login");
     if (cJSON_IsString(login) && (login->valuestring != NULL)){
         // If the login is provided then the password is required
-        password = cJSON_GetObjectItemCaseSensitive(inBody, "password");
+        password = cJSON_GetObjectItemCaseSensitive(request, "password");
         if (!cJSON_IsString(password) || (password->valuestring == NULL)){
-            fprintf(stdout,"password is not defined\r\n");
+            fprintf(stdout,"ERROR: password is not defined\r\n");
             goto error; 
         }
     }else{
         login = NULL;
     }
 
-    // Building the connection string (6 in tail is :<port> as port max string length is 5)
+    // Build the connection string (6 in tail is :<port> as port max string length is 5)
     char *prefix = "opc.tcp://";
     int urlLen = strlen(prefix) + strlen(host->valuestring) + 6; // :65535 is max
     if (endpoint != NULL){
         urlLen += strlen( endpoint->valuestring );
     }
-    fprintf(stdout,"DEBUG: urlLen %d\r\n",urlLen);
 
-    connectonString = malloc( urlLen );
+    connectionString = malloc( urlLen );
     if (endpoint != NULL){
-        sprintf(connectonString, "%s%s:%d/%s", prefix, host->valuestring, (int)port->valuedouble, endpoint->valuestring);
+        sprintf(connectionString, "%s%s:%d/%s", prefix, host->valuestring, (int)port->valuedouble, endpoint->valuestring);
     }else{
-        sprintf(connectonString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
+        sprintf(connectionString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
     }
-    fprintf(stdout,"DEBUG: url %s\r\n",connectonString);
+    fprintf(stdout,"DEBUG: url %s\r\n",connectionString);
 
-
-    // Build the request structure
-    request = cJSON_CreateObject();
-    if (request == NULL){
-        fprintf(stdout,"unable to alocate the request object\r\n");
-        goto error; 
-    }
-    if (cJSON_AddStringToObject(request, "url", connectonString) == NULL) {
+    if (cJSON_AddStringToObject(request, "url", connectionString) == NULL) {
         fprintf(stdout,"unable to add the url to the request object\r\n");
         goto error; 
     }
-    free(connectonString);
-
-    if (login != NULL && password != NULL){
-        if (cJSON_AddStringToObject(request, "login", login->valuestring) == NULL) {
-            fprintf(stdout,"unable to add the login to the request object\r\n");
-            goto error; 
-        }
-         if (cJSON_AddStringToObject(request, "password", password->valuestring) == NULL) {
-            fprintf(stdout,"unable to add the password to the request object\r\n");
-            goto error; 
-        }
-    }
+    free(connectionString);
+    cJSON_Delete( host );
+    cJSON_Delete( port );
+    cJSON_Delete( endpoint );
 
     fprintf(stdout,"DEBUG: return parsed connect request\r\n");
     
-    return request;
+    return 0;
 
 error:
-    if (connectonString != NULL){
-        free(connectonString);
+    if (connectionString != NULL){
+        free(connectionString);
     }
-    cJSON_Delete( request );
     cJSON_Delete( host );
     cJSON_Delete( port );
-    cJSON_Delete( login );
-    cJSON_Delete( password );
-    return NULL;
+    cJSON_Delete( endpoint );
+    return -1;
 }
 
-cJSON* parse_read_request( cJSON *inBody ){
-    cJSON *request = NULL;
+int parse_read_request( cJSON *request ){
     cJSON *item = NULL;
-    cJSON *iter = NULL;
 
-    if ( !cJSON_IsArray(inBody) ) {
+    if ( !cJSON_IsArray(request) ) {
         fprintf(stdout,"ERROR: invalid read parameters\r\n");
         goto error;
     }
 
     // Copy request items
-    request = cJSON_CreateArray();
-    cJSON_ArrayForEach(item, inBody) {
+    cJSON_ArrayForEach(item, request) {
         if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
             fprintf(stdout,"ERROR: invalid item to read\r\n");
             goto error;
         }
-        iter = cJSON_CreateString( item->valuestring );
-        if (item == NULL){
-            fprintf(stdout,"ERROR: unable to allocate an item %s for read collection\r\n", item->valuestring );
-            goto error;
-        }
-        if ( !cJSON_AddItemToArray(request, iter) ) {
-            fprintf(stdout,"ERROR: unable to add %s item to array\r\n", item->valuestring);
-            goto error;
-        }
-
     }
-    
-    return request;
+    return 0;
 
 error:
-    cJSON_Delete( request );
-    cJSON_Delete( item );
-    return NULL;
+    return -1;
 }
 
-cJSON* parse_write_request( cJSON *inBody ){
-    cJSON *request = NULL;
-
-    cJSON *in_tag = NULL;
+int parse_write_request( cJSON *request ){
     cJSON *tag = NULL;
-
-    cJSON *in_value = NULL;
-    
+    cJSON *value = NULL;
     cJSON *item = NULL;
-    cJSON *iter = NULL;
 
-    if ( !cJSON_IsObject(inBody) ) {
+    if ( !cJSON_IsObject(request) ) {
         fprintf(stdout,"ERROR: invalid write parameters\r\n");
         goto error;
     }
 
-    in_tag = cJSON_GetObjectItemCaseSensitive(inBody, "tag");
-    if (!cJSON_IsArray(in_tag)) {
+    // ------------Tag---------------------------------
+    tag = cJSON_GetObjectItemCaseSensitive(request, "tag");
+    if (!cJSON_IsArray(tag)) {
         fprintf(stdout,"ERROR: invalid tag\r\n");
         goto error;
     }
-
-    // ------------Tag---------------------------------
-    tag = cJSON_CreateArray();
-    cJSON_ArrayForEach(item, in_tag) {
+    cJSON_ArrayForEach(item, tag) {
         if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
             fprintf(stdout,"ERROR: invalid item to write\r\n");
             goto error;
         }
-        fprintf(stdout,"DEBUG: add %s to path\r\n",item->valuestring);
-        iter = cJSON_CreateString( item->valuestring );
-        if (item == NULL){
-            fprintf(stdout,"ERROR: unable to allocate an item %s for write collection\r\n", item->valuestring );
-            goto error;
-        }
-        if ( !cJSON_AddItemToArray(tag, iter) ) {
-            fprintf(stdout,"ERROR: unable to add an item %s to path\r\n", item->valuestring);
-            goto error;
-        }
-    }
-    request = cJSON_CreateObject();
-    if(request == NULL){
-        fprintf(stdout,"ERROR: unable to allocate the request object\r\n");
-        goto error;
-    }
-    fprintf(stdout,"DEBUG: add tag to request\r\n");
-    if (!cJSON_AddItemToObject(request,"tag",tag)){
-        fprintf(stdout,"ERROR: unable to add tag to write request\r\n");
     }
 
     // ---------value---------------------------------------
-    in_value = cJSON_GetObjectItemCaseSensitive(inBody, "value");
+    value = cJSON_GetObjectItemCaseSensitive(request, "value");
     fprintf(stdout,"DEBUG: add value to request\r\n");
-    if (cJSON_IsString(in_value) && (in_value->valuestring != NULL)) {
-        if (!cJSON_AddStringToObject(request,"value",in_value->valuestring) ){
-            fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
-            goto error;
-        }
-    }else if(cJSON_IsNumber(in_value)){
-        if (!cJSON_AddNumberToObject(request,"value",in_value->valuedouble) ){
-            fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
-            goto error;
-        }
-    }else if( cJSON_IsBool(in_value)){
-        if (cJSON_IsFalse(in_value)){
-            if (!cJSON_AddNumberToObject(request,"value",0) ){
-                fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
-                goto error;
-            }
+    if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+        // OK
+    }else if(cJSON_IsNumber(value)){
+        // OK
+    }else if( cJSON_IsBool(value) ){
+        if (cJSON_IsFalse(value)){
+            value = cJSON_CreateNumber(0);
         }else{
-            if (!cJSON_AddNumberToObject(request,"value",1) ){
-                fprintf(stdout,"ERROR: unable to add value to the write request\r\n");
-                goto error;
-            }
+            value = cJSON_CreateNumber(1);
+        }
+        if (value == NULL){
+            fprintf(stdout,"ERROR: unable alocate cJSON object for value\r\n");
+            goto error;
+        }
+        // cJSON purges the previous ite itself
+        if ( !cJSON_ReplaceItemInObjectCaseSensitive(request,"value",value) ){
+            fprintf(stdout,"ERROR: unable to coerce the value\r\n");
+            goto error;
         }
     }else{
         fprintf(stdout,"ERROR: invalid value to write\r\n");
@@ -412,13 +359,38 @@ cJSON* parse_write_request( cJSON *inBody ){
     }
 
     fprintf(stdout,"DEBUG: return parsed write request\r\n");
-    return request;
+    return 0;
 
 error:
-    if (request != NULL){
-        cJSON_Delete( request );
-    }else{
-        cJSON_Delete( tag );
-    }
-    return NULL;
+    return -1;
 }
+
+int parse_browse_endpoints_request( cJSON *request ){
+    cJSON *host = NULL;
+    cJSON *port = NULL;
+
+    if ( !cJSON_IsObject(request) ) {
+        fprintf(stdout,"ERROR: invalid parameters\r\n");
+        goto error;
+    }
+
+    // Parse host
+    host = cJSON_GetObjectItemCaseSensitive(request, "host");
+    if (!cJSON_IsString(host) || (host->valuestring == NULL)){
+        fprintf(stdout,"ERROR: host is not defined\r\n");
+        goto error; 
+    }
+
+    // Parse port
+    port = cJSON_GetObjectItemCaseSensitive(request, "port");
+    if (!cJSON_IsNumber(port)){
+        fprintf(stdout,"ERROR: port is not defined\r\n");
+        goto error; 
+    }
+    
+    return 0;
+
+error:
+    return -1;
+}
+

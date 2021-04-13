@@ -31,6 +31,7 @@ cJSON* on_ok(cJSON* response);
 cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
 cJSON* opcua_client_write(cJSON* request);
+cJSON* opcua_client_browse_endpoints(cJSON* request);
 
 int path2nodeId( cJSON *path, UA_NodeId *node );
 cJSON* browse_folder( UA_NodeId folder );
@@ -58,6 +59,8 @@ char* on_request( char *requestString ){
         response = opcua_client_read( request->body );
     } else if (request->cmd == OPCUA_CLIENT_WRITE ){
         response = opcua_client_write( request->body );
+    }else if (request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
+        response = opcua_client_browse_endpoints( request->body );
     } else{
         response = on_error("unsupported command type");
     }
@@ -102,6 +105,7 @@ error:
 }
 
 cJSON* opcua_client_connect(cJSON* request){
+    cJSON *response = NULL;
     char *errorString = NULL;
     UA_StatusCode retval;
 
@@ -128,7 +132,7 @@ cJSON* opcua_client_connect(cJSON* request){
         goto error;
     }
 
-    cJSON *response = cJSON_CreateString("ok");
+    response = cJSON_CreateString("ok");
     if (response == NULL){
         goto error;
     }
@@ -228,38 +232,75 @@ error:
     return on_error( errorString );
 }
 
-int path2nodeId( cJSON *path, UA_NodeId *node ){
-    cJSON *level = NULL;
-    cJSON *content = NULL;
-    cJSON *next = NULL;
+cJSON* opcua_client_browse_endpoints(cJSON* request){
+    cJSON *response = NULL;
+    cJSON *endpoint = NULL;
+    char *errorString = NULL;
+    char *connectionString = NULL;
 
-    // Start from the Objects folder
-    cJSON_ArrayForEach(level, path) {
-        content = browse_folder( *node );
-        if (content == NULL){
-            fprintf(stdout,"ERROR: path2nodeId unable to browse folder\r\n");
+    UA_EndpointDescription* endpointArray = NULL;
+    size_t endpointArraySize = 0;
+    UA_StatusCode retval;
+
+    // Connection params
+    cJSON *host = cJSON_GetObjectItemCaseSensitive(request, "host");
+    cJSON *port = cJSON_GetObjectItemCaseSensitive(request, "port");
+
+    // Build the connection string (6 in tail is :<port> as port max string length is 5)
+    char *prefix = "opc.tcp://";
+    int urlLen = strlen(prefix) + strlen(host->valuestring) + 6; // :65535 is max
+    connectionString = malloc( urlLen );
+    if (connectionString == NULL){
+        errorString = "unable to allocate connectionString";
+        goto error;
+    }
+    sprintf(connectionString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
+    fprintf(stdout,"DEBUG: connectionString %s\r\n",connectionString);
+
+    // Request endpoints
+    retval = UA_Client_getEndpoints(opcua_client, connectionString, &endpointArraySize, &endpointArray);
+    if(retval != UA_STATUSCODE_GOOD) {
+        errorString = "connection error";
+        goto error;
+    }
+    fprintf(stdout,"DEBUG: %i endpoints found\r\n",(int)endpointArraySize);
+
+    // Build the response
+    response = cJSON_CreateArray();
+    if(response == NULL){
+        errorString = "unable to allocate CJSON object for response";
+        goto error;
+    }
+    for(size_t i=0; i<endpointArraySize; i++) {
+        endpoint = cJSON_CreateString( (char *)endpointArray[i].server.discoveryUrls->data );
+        if (endpoint == NULL){
+            errorString = "unable to allocate CJSON object for endpoint";
             goto error;
         }
-
-        // Lookup node by name
-        next = cJSON_GetObjectItemCaseSensitive(content, level->valuestring );
-        if (!cJSON_IsString(next) || (next->valuestring == NULL)){
-            fprintf(stdout,"ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
+        if (!cJSON_AddItemToArray(response,endpoint)){
+            errorString = "unable to add endpoint to the array";
             goto error;
         }
-
-        if (UA_NodeId_parse(node, UA_STRING((char*)(uintptr_t)next->valuestring)) != UA_STATUSCODE_GOOD){
-            fprintf(stdout,"ERROR: path2nodeId unable to parse nodeId %s\r\n",next->valuestring);
-            goto error;
-        }
-        cJSON_Delete( content );
     }
 
-    return 0;
+    free(connectionString);
+    UA_Array_delete(endpointArray,endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
+
+    return on_ok( response );
 
 error:
-    cJSON_Delete( content );
-    return -1;
+    if (connectionString != NULL){
+        free(connectionString);
+    }
+    if (endpointArray != NULL){
+        UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
+    }
+    cJSON_Delete( endpoint );
+    cJSON_Delete( response );
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_browse_endpoints";
+    }
+    return on_error( errorString );
 }
 
 cJSON* browse_folder( UA_NodeId folder ){
@@ -315,6 +356,42 @@ error:
     return NULL;
 }
 
+//---------------------------------------------------------------------------
+//  Internal helpers
+//---------------------------------------------------------------------------
+int path2nodeId( cJSON *path, UA_NodeId *node ){
+    cJSON *level = NULL;
+    cJSON *content = NULL;
+    cJSON *next = NULL;
+
+    // Start from the Objects folder
+    cJSON_ArrayForEach(level, path) {
+        content = browse_folder( *node );
+        if (content == NULL){
+            fprintf(stdout,"ERROR: path2nodeId unable to browse folder\r\n");
+            goto error;
+        }
+
+        // Lookup node by name
+        next = cJSON_GetObjectItemCaseSensitive(content, level->valuestring );
+        if (!cJSON_IsString(next) || (next->valuestring == NULL)){
+            fprintf(stdout,"ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
+            goto error;
+        }
+
+        if (UA_NodeId_parse(node, UA_STRING((char*)(uintptr_t)next->valuestring)) != UA_STATUSCODE_GOOD){
+            fprintf(stdout,"ERROR: path2nodeId unable to parse nodeId %s\r\n",next->valuestring);
+            goto error;
+        }
+        cJSON_Delete( content );
+    }
+
+    return 0;
+
+error:
+    cJSON_Delete( content );
+    return -1;
+}
 
 cJSON* parse_value( UA_Variant *ua_value ){
     cJSON *value = NULL;
