@@ -34,6 +34,7 @@
     connect/2,connect/3,
     read/2,read/3,
     write/3,write/4,
+    subscribe/2,subscribe/3,
     browse_endpoints/2,browse_endpoints/3,
     browse_folder/2,browse_folder/3
 ]).
@@ -89,6 +90,11 @@ write(PID, Path, Value)->
     write(PID,Path, Value,?RESPONSE_TIMEOUT).
 write(PID, Path, Value, Timeout)->
     transaction( PID, <<"write">>, #{ <<"tag">> => Path, <<"value">> => Value}, Timeout ).
+
+subscribe(PID, Path)->
+    subscribe(PID,Path,?RESPONSE_TIMEOUT).
+subscribe(PID, Path, Timeout)->
+    transaction( PID, <<"subscribe">>, Path, Timeout ).
 
 browse_endpoints(PID, Params)->
     browse_endpoints(PID, Params,?RESPONSE_TIMEOUT).

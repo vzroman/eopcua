@@ -31,6 +31,7 @@ cJSON* on_ok(cJSON* response);
 cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
 cJSON* opcua_client_write(cJSON* request);
+cJSON* opcua_client_subscribe(cJSON* request);
 cJSON* opcua_client_browse_endpoints(cJSON* request);
 cJSON* opcua_client_browse_folder(cJSON* request);
 
@@ -38,9 +39,13 @@ int path2nodeId( cJSON *path, UA_NodeId *node );
 cJSON* browse_folder( UA_NodeId folder );
 cJSON* parse_value( UA_Variant *value );
 int export_value(UA_Variant *ua_value, cJSON *value);
+int init_subscriptions(void);
+static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
+                         UA_UInt32 monId, void *monContext, UA_DataValue *value);
 
 // Global variables
 UA_Client *opcua_client;
+UA_UInt32 subscriptionId;
 
 char* on_request( char *requestString ){
     cJSON *response;
@@ -58,8 +63,10 @@ char* on_request( char *requestString ){
         response = opcua_client_connect( request->body );
     } else if (request->cmd == OPCUA_CLIENT_READ ){
         response = opcua_client_read( request->body );
-    } else if (request->cmd == OPCUA_CLIENT_WRITE ){
+    }else if (request->cmd == OPCUA_CLIENT_WRITE ){
         response = opcua_client_write( request->body );
+    }else if (request->cmd == OPCUA_CLIENT_SUBSCRIBE ){
+        response = opcua_client_subscribe( request->body );
     }else if (request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
         response = opcua_client_browse_endpoints( request->body );
     }else if (request->cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
@@ -135,6 +142,11 @@ cJSON* opcua_client_connect(cJSON* request){
         goto error;
     }
 
+    if (init_subscriptions() != 0){
+        errorString = "init subscription error";
+        goto error;
+    }
+
     response = cJSON_CreateString("ok");
     if (response == NULL){
         goto error;
@@ -162,6 +174,11 @@ cJSON* opcua_client_read(cJSON* request){
         errorString = "invalid node path";
         goto error;
     }
+
+    // TODO. How to do it periodically? 
+    // Keep the time of the last call in global variables?
+    UA_Client_run_iterate(opcua_client, 10);
+
 
     /* Read the value */
     if (UA_Client_readValueAttribute(opcua_client, nodeId, value) != UA_STATUSCODE_GOOD ) {
@@ -231,6 +248,53 @@ error:
     cJSON_Delete( response );
     if (errorString == NULL){
         errorString = "programming error in opcua_client_write";
+    }
+    return on_error( errorString );
+}
+
+cJSON* opcua_client_subscribe(cJSON* request){
+    char *errorString = NULL;
+    UA_Variant *value = UA_Variant_new();
+    cJSON *response = NULL;
+    fprintf(stdout,"DEBUG: subscribing\r\n");
+
+    UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    int ret = path2nodeId( request, &nodeId );
+    if (ret != 0){
+        errorString = "invalid node path";
+        goto error;
+    }
+
+    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(nodeId);
+ 
+    UA_MonitoredItemCreateResult monResponse =
+    UA_Client_MonitoredItems_createDataChange(opcua_client, subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
+                                              monRequest, NULL, on_subscription_update, NULL);
+
+    fprintf(stdout,"DEBUG: monResponse.monitoredItemId %d\r\n", monResponse.monitoredItemId);
+
+    if(monResponse.statusCode != UA_STATUSCODE_GOOD){
+        errorString = "uanble to add a monitored item";
+        goto error;
+    }
+ 
+    /* The first publish request should return the initial value of the variable */
+    UA_Client_run_iterate(opcua_client, 10);
+
+    response = cJSON_CreateString("ok");
+
+    // response = parse_value( value );    
+    // UA_Variant_delete(value);
+    // if (response == NULL){
+    //     goto error;
+    // }
+    return on_ok( response );
+
+error:
+    UA_Variant_delete(value);
+    cJSON_Delete( response );
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_read";
     }
     return on_error( errorString );
 }
@@ -336,6 +400,7 @@ error:
 cJSON* browse_folder( UA_NodeId folder ){
     cJSON *result = NULL;
     UA_String nodeId;
+    //UA_String referenceTypeId;
 
     // Build the request
     UA_BrowseRequest request;
@@ -365,13 +430,23 @@ cJSON* browse_folder( UA_NodeId folder ){
                 fprintf(stdout,"ERROR: unable to serialize nodeId in browse_folder\r\n");
                 goto error; 
             }
+
+            // // Convert referenceType to string
+            // if (UA_NodeId_print(&ref->referenceTypeId, &referenceTypeId) != UA_STATUSCODE_GOOD){
+            //     fprintf(stdout,"ERROR: unable to serialize referenceTypeId in browse_folder\r\n");
+            //     goto error; 
+            // }
+            // TODO. Include referenceTypeId to the result to be able to distinguish between folders and leaves
+            //fprintf(stdout,"DEBUG: referenceTypeId %s\r\n", referenceTypeId.data);
             
             if (cJSON_AddStringToObject(result, (char *)ref->displayName.text.data, (char *)nodeId.data) == NULL) {
                 fprintf(stdout,"ERROR: unable to add a node the result in browse_folder\r\n");
                 UA_String_clear(&nodeId);
+                //UA_String_clear(&referenceTypeId);
                 goto error; 
             }
             UA_String_clear(&nodeId);
+            //UA_String_clear(&referenceTypeId);
         }
     }
     UA_BrowseRequest_clear(&request);
@@ -542,6 +617,37 @@ int export_value(UA_Variant *ua_value, cJSON *value){
         }
     }
     return retval;
+}
+
+int init_subscriptions(){
+
+    UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
+    UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(opcua_client, request, NULL, NULL, NULL);
+ 
+    subscriptionId = response.subscriptionId;
+    if(response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+        fprintf(stdout,"ERROR: unable to create a subscription request\r\n");
+        goto error;
+    }
+    printf("DEBUG: Create subscription succeeded, id %u\r\n", subscriptionId);
+ 
+   return 0;
+error:
+    if(UA_Client_Subscriptions_deleteSingle(opcua_client, subscriptionId) == UA_STATUSCODE_GOOD){
+        fprintf(stdout,"ERROR: unable to purge the subscription request\r\n");
+    }
+    return -1;
+}
+
+static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
+                         UA_UInt32 monId, void *monContext, UA_DataValue *value) {
+    fprintf(stdout,"DEBUG: on_subscription_update\r\n");
+    fprintf(stdout,"DEBUG: subId %i\r\n",subId);
+    fprintf(stdout,"DEBUG: monId %i\r\n",monId);
+
+    cJSON *v = parse_value(&value->value);
+
+    fprintf(stdout,"DEBUG: v %d\r\n",(int)v->valuedouble);
 }
 
 // #ifdef UA_ENABLE_SUBSCRIPTIONS

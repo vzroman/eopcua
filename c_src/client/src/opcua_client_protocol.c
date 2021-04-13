@@ -24,6 +24,7 @@
 int parse_connect_request( cJSON *body );
 int parse_read_request( cJSON *body );
 int parse_write_request( cJSON *body );
+int parse_subscribe_request( cJSON *body );
 int parse_browse_endpoints_request( cJSON *body );
 int parse_browse_folder_request( cJSON *body );
 
@@ -87,6 +88,9 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     }else if( request->cmd == OPCUA_CLIENT_WRITE ){
         fprintf(stdout,"DEBUG: parse write body\r\n");
         if (parse_write_request( request->body ) != 0){ goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_SUBSCRIBE ){
+        fprintf(stdout,"DEBUG: parse subscribe body\r\n");
+        if (parse_subscribe_request( request->body ) != 0){ goto error; }
     }else if( request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
         fprintf(stdout,"DEBUG: parse browse endpoints body\r\n");
         if (parse_browse_endpoints_request( request->body ) != 0){ goto error; }
@@ -364,6 +368,26 @@ int parse_write_request( cJSON *request ){
     }
 
     fprintf(stdout,"DEBUG: return parsed write request\r\n");
+    return 0;
+
+error:
+    return -1;
+}
+
+int parse_subscribe_request( cJSON *request ){
+    cJSON *item = NULL;
+
+    if ( !cJSON_IsArray(request) ) {
+        fprintf(stdout,"ERROR: invalid subscribe parameter\r\n");
+        goto error;
+    }
+
+    cJSON_ArrayForEach(item, request) {
+        if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+            fprintf(stdout,"ERROR: invalid item to subscribe\r\n");
+            goto error;
+        }
+    }
     return 0;
 
 error:
