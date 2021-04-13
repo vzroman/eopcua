@@ -23,4 +23,6 @@ Example
     
     {ok,<<"ok">>} = eopcua:write(Port, [ <<"StaticData">>,<<"AnalogItems">>,<<"Int32AnalogItem">> ], 34).
     
+    {ok,Value} = eopcua:subscribe(Port, [ <<"StaticData">>,<<"AnalogItems">>,<<"Int32AnalogItem">> ]).
+    
     
