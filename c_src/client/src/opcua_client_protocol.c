@@ -25,6 +25,8 @@ int parse_connect_request( cJSON *body );
 int parse_read_request( cJSON *body );
 int parse_write_request( cJSON *body );
 int parse_browse_endpoints_request( cJSON *body );
+int parse_browse_folder_request( cJSON *body );
+
 OPCUA_CLIENT_CMD string2cmd(char *cmd);
 char* cmd2string(OPCUA_CLIENT_CMD cmd);
 
@@ -86,8 +88,11 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
         fprintf(stdout,"DEBUG: parse write body\r\n");
         if (parse_write_request( request->body ) != 0){ goto error; }
     }else if( request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
-        fprintf(stdout,"DEBUG: parse write body\r\n");
+        fprintf(stdout,"DEBUG: parse browse endpoints body\r\n");
         if (parse_browse_endpoints_request( request->body ) != 0){ goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
+        fprintf(stdout,"DEBUG: parse browse folder body\r\n");
+        if (parse_browse_folder_request( request->body ) != 0){ goto error; }
     } else {
         fprintf(stdout,"invalid command type %d\r\n",request->cmd);
         goto error;
@@ -388,6 +393,27 @@ int parse_browse_endpoints_request( cJSON *request ){
         goto error; 
     }
     
+    return 0;
+
+error:
+    return -1;
+}
+
+int parse_browse_folder_request( cJSON *request ){
+    cJSON *item = NULL;
+
+    if ( !cJSON_IsArray(request) ) {
+        fprintf(stdout,"ERROR: invalid folder parameter\r\n");
+        goto error;
+    }
+
+    // Copy request items
+    cJSON_ArrayForEach(item, request) {
+        if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+            fprintf(stdout,"ERROR: invalid item to browse\r\n");
+            goto error;
+        }
+    }
     return 0;
 
 error:

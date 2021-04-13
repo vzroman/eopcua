@@ -34,7 +34,8 @@
     connect/2,connect/3,
     read/2,read/3,
     write/3,write/4,
-    browse_endpoints/2,browse_endpoints/3
+    browse_endpoints/2,browse_endpoints/3,
+    browse_folder/2,browse_folder/3
 ]).
 
 -define(CONNECT_TIMEOUT,30000).
@@ -79,20 +80,25 @@ connect(PID, Params)->
 connect(PID, Params, Timeout)->
     transaction( PID, <<"connect">>, Params, Timeout ).   
 
-read(PID, Nodes)->
-    read(PID,Nodes,?RESPONSE_TIMEOUT).
-read(PID, Nodes, Timeout)->
-    transaction( PID, <<"read">>, Nodes, Timeout ).
+read(PID, Path)->
+    read(PID,Path,?RESPONSE_TIMEOUT).
+read(PID, Path, Timeout)->
+    transaction( PID, <<"read">>, Path, Timeout ).
 
-write(PID, Node, Value)->
-    write(PID,Node, Value,?RESPONSE_TIMEOUT).
-write(PID, Node, Value, Timeout)->
-    transaction( PID, <<"write">>, #{ <<"tag">> => Node, <<"value">> => Value}, Timeout ).
+write(PID, Path, Value)->
+    write(PID,Path, Value,?RESPONSE_TIMEOUT).
+write(PID, Path, Value, Timeout)->
+    transaction( PID, <<"write">>, #{ <<"tag">> => Path, <<"value">> => Value}, Timeout ).
 
 browse_endpoints(PID, Params)->
     browse_endpoints(PID, Params,?RESPONSE_TIMEOUT).
 browse_endpoints(PID, Params, Timeout)->
     transaction( PID, <<"browse_endpoints">>, Params, Timeout ).  
+
+browse_folder(PID, Path)->
+    browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
+browse_folder(PID, Path, Timeout)->
+    transaction( PID, <<"browse_folder">>, Path, Timeout ).  
 
 transaction( PID, Command, Body, Timeout )->
     TID = rand:uniform(16#FFFF),

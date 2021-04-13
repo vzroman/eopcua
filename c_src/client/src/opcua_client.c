@@ -32,6 +32,7 @@ cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
 cJSON* opcua_client_write(cJSON* request);
 cJSON* opcua_client_browse_endpoints(cJSON* request);
+cJSON* opcua_client_browse_folder(cJSON* request);
 
 int path2nodeId( cJSON *path, UA_NodeId *node );
 cJSON* browse_folder( UA_NodeId folder );
@@ -61,6 +62,8 @@ char* on_request( char *requestString ){
         response = opcua_client_write( request->body );
     }else if (request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
         response = opcua_client_browse_endpoints( request->body );
+    }else if (request->cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
+        response = opcua_client_browse_folder( request->body );
     } else{
         response = on_error("unsupported command type");
     }
@@ -296,6 +299,33 @@ error:
         UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
     }
     cJSON_Delete( endpoint );
+    cJSON_Delete( response );
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_browse_endpoints";
+    }
+    return on_error( errorString );
+}
+
+cJSON* opcua_client_browse_folder(cJSON* request){
+    cJSON *response = NULL;
+    char *errorString = NULL;
+
+    UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    int ret = path2nodeId( request, &nodeId );
+    if (ret != 0){
+        errorString = "invalid node path";
+        goto error;
+    }
+
+    response = browse_folder( nodeId );
+    if(response == NULL){
+        errorString = "invalid folder";
+        goto error;
+    }
+
+    return on_ok( response );
+
+error:
     cJSON_Delete( response );
     if (errorString == NULL){
         errorString = "programming error in opcua_client_browse_endpoints";
