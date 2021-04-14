@@ -46,6 +46,12 @@ case "$1" in
         cd build
         cmake cmake .. -DENABLE_CJSON_UTILS=On -DENABLE_CJSON_TEST=Off -DCMAKE_INSTALL_PREFIX=_install -DBUILD_SHARED_LIBS=Off 
         make && make install
+
+        # uthash
+        cd $BASEDIR
+        if [ ! -d uthash ]; then
+            git clone -b v2.3.0 https://github.com/troydhanson/uthash.git
+        fi
         
         ;;
 esac

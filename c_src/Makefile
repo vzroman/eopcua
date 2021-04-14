@@ -16,6 +16,8 @@ OPEN62541_LIB_DIR ?= $(CURDIR)/open62541/build/_install/lib64
 CJSON_INCLUDE_DIR ?= $(CURDIR)/cJSON/build/_install/include
 CJSON_LIB_DIR ?= $(CURDIR)/cJSON/build/_install/lib64
 
+UTHASH_INCLUDE_DIR ?= $(CURDIR)/uthash/include
+
 EPORT_INCLUDE_DIR ?= $(CURDIR)/eport/include
 CLIENT_INCLUDE_DIR ?= $(CURDIR)/client/include
 
@@ -40,8 +42,8 @@ else ifeq ($(UNAME_SYS), Linux)
 	CXXFLAGS ?= -O3 -finline-functions -Wall
 endif
 
-CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR) -I $(CLIENT_INCLUDE_DIR)
-CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR) -I $(CLIENT_INCLUDE_DIR)
+CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(UTHASH_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR) -I $(CLIENT_INCLUDE_DIR)
+CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(UTHASH_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR) -I $(CLIENT_INCLUDE_DIR)
 
 LDLIBS += -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei -L $(OPEN62541_LIB_DIR) -lopen62541 -L $(CJSON_LIB_DIR) -lcjson -lcjson_utils
 
@@ -56,7 +58,7 @@ cpp_verbose = $(cpp_verbose_$(V))
 link_verbose_0 = @echo " LD    " $(@F);
 link_verbose = $(link_verbose_$(V))
 
-SOURCES := $(shell find $(C_SRC_DIR) -type d \( -name "open62541" -o -name "cJSON" \) -prune -false -o -type f \( -name "*.c" -o -name "*.C" -o -name "*.cc" -o -name "*.cpp" \))
+SOURCES := $(shell find $(C_SRC_DIR) -type d \( -name "open62541" -o -name "cJSON" -o -name "uthash" \) -prune -false -o -type f \( -name "*.c" -o -name "*.C" -o -name "*.cc" -o -name "*.cpp" \))
 OBJECTS = $(addsuffix .o, $(basename $(SOURCES)))
 
 COMPILE_C = $(c_verbose) $(CC) $(CFLAGS) $(CPPFLAGS) -c
