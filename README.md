@@ -25,4 +25,6 @@ Example
     
     {ok,Value} = eopcua:subscribe(Port, [ <<"StaticData">>,<<"AnalogItems">>,<<"Int32AnalogItem">> ]).
     
+    {ok,<<"ok">>} = eopcua:update_subscriptions(Port).
+    
     
