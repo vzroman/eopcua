@@ -35,6 +35,7 @@
     read/2,read/3,
     write/3,write/4,
     subscribe/2,subscribe/3,
+    update_subscriptions/1,update_subscriptions/2,
     browse_endpoints/2,browse_endpoints/3,
     browse_folder/2,browse_folder/3
 ]).
@@ -96,6 +97,11 @@ subscribe(PID, Path)->
 subscribe(PID, Path, Timeout)->
     transaction( PID, <<"subscribe">>, Path, Timeout ).
 
+update_subscriptions(PID)->
+    update_subscriptions(PID,?RESPONSE_TIMEOUT).
+update_subscriptions(PID, Timeout)->
+    transaction( PID, <<"update_subscriptions">>, <<"true">>, Timeout ).
+
 browse_endpoints(PID, Params)->
     browse_endpoints(PID, Params,?RESPONSE_TIMEOUT).
 browse_endpoints(PID, Params, Timeout)->
@@ -130,7 +136,6 @@ wait_for_reply( PID, Command, TID, Timeout )->
                             {error, {unexpected_port_reply, Unexpected} }
                     end;
                 Unexpected->
-                    io:format("unexpected reply from the port ~p\r\n",[Unexpected]),
                     ?LOGWARNING("unexpected reply from the port ~p",[Unexpected]),
                     wait_for_reply( PID, Command, TID, Timeout )
             end;
@@ -192,11 +197,9 @@ call( Port, Msg, _Options, Timeout )->
     Port ! {self(), {command, Msg}},
     receive
         {Port, {data, Data}} ->
-            io:format("data from port ~p\r\n",[Data]),
             {ok, Data }
     after
         Timeout->
-            io:format("port timeout ~p\r\n",[Timeout]),
             {error, timeout}
     end.
 

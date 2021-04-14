@@ -27,6 +27,21 @@
 // Output file descriptor for sending response to erlang
 #define OUT_DESC 4
 
+// Debug info
+#define EPORT_DEBUG 1
+
+#ifdef EPORT_DEBUG
+
+#define LOGDEBUG(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
+
+#else
+
+#define LOGDEBUG(...) do{  } while(0)
+
+#endif
+
+#define LOGERROR(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
+
 typedef unsigned char byte;
 
 // Callback type 

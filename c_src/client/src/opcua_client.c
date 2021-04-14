@@ -32,10 +32,12 @@ cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
 cJSON* opcua_client_write(cJSON* request);
 cJSON* opcua_client_subscribe(cJSON* request);
+cJSON* opcua_client_update_subscriptions(cJSON* request);
 cJSON* opcua_client_browse_endpoints(cJSON* request);
 cJSON* opcua_client_browse_folder(cJSON* request);
 
 int path2nodeId( cJSON *path, UA_NodeId *node );
+char* path2string( cJSON *path );
 cJSON* browse_folder( UA_NodeId folder );
 cJSON* parse_value( UA_Variant *value );
 int export_value(UA_Variant *ua_value, cJSON *value);
@@ -47,16 +49,20 @@ static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *sub
 UA_Client *opcua_client;
 UA_UInt32 subscriptionId;
 
+// Subscription indexes
+opcua_client_binding *opcua_client_bindings = NULL;
+opcua_client_subscription *opcua_client_subscriptions = NULL;
+
 char* on_request( char *requestString ){
     cJSON *response;
     char *responseString;
 
     // Parse the request
-    fprintf(stdout,"DEBUG: parsing the request\r\n");
+    LOGDEBUG("DEBUG: parsing the request\r\n");
     OPCUA_CLIENT_REQUEST *request = parse_request( requestString );
 
     // Handle the request
-    fprintf(stdout,"DEBUG: handle the request\r\n");
+    LOGDEBUG("DEBUG: handle the request\r\n");
     if (request == NULL){
         response = on_error("invalid request");
     } else if( request->cmd == OPCUA_CLIENT_CONNECT ){
@@ -67,6 +73,8 @@ char* on_request( char *requestString ){
         response = opcua_client_write( request->body );
     }else if (request->cmd == OPCUA_CLIENT_SUBSCRIBE ){
         response = opcua_client_subscribe( request->body );
+    }else if (request->cmd == OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS ){
+        response = opcua_client_update_subscriptions( request->body );
     }else if (request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
         response = opcua_client_browse_endpoints( request->body );
     }else if (request->cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
@@ -79,7 +87,7 @@ char* on_request( char *requestString ){
     responseString = create_response( request, response );
 
     purge_request( request );
-    fprintf(stdout,"DEBUG: response %s\r\n",responseString);
+    LOGDEBUG("DEBUG: response %s\r\n",responseString);
 
     return responseString;
 }
@@ -130,10 +138,10 @@ cJSON* opcua_client_connect(cJSON* request){
 
     if (login != NULL && password != NULL){
         // Authorized access
-        fprintf(stdout,"connecting to %s, user %s\r\n", url->valuestring,login->valuestring);
+        LOGDEBUG("DEBUG: connecting to %s, user %s\r\n", url->valuestring,login->valuestring);
         retval = UA_Client_connectUsername(opcua_client, url->valuestring, login->valuestring, password->valuestring);
     }else{
-        fprintf(stdout,"connecting to %s\r\n", url->valuestring);
+        LOGDEBUG("DEBUG: connecting to %s\r\n", url->valuestring);
         retval = UA_Client_connect(opcua_client, url->valuestring);
     }
 
@@ -166,7 +174,7 @@ cJSON* opcua_client_read(cJSON* request){
     char *errorString = NULL;
     UA_Variant *value = UA_Variant_new();
     cJSON *response = NULL;
-    fprintf(stdout,"DEBUG: reading\r\n");
+    LOGDEBUG("DEBUG: reading\r\n");
 
     UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
     int ret = path2nodeId( request, &nodeId );
@@ -175,23 +183,20 @@ cJSON* opcua_client_read(cJSON* request){
         goto error;
     }
 
-    // TODO. How to do it periodically? 
-    // Keep the time of the last call in global variables?
-    UA_Client_run_iterate(opcua_client, 10);
-
-
     /* Read the value */
     if (UA_Client_readValueAttribute(opcua_client, nodeId, value) != UA_STATUSCODE_GOOD ) {
-        fprintf(stdout,"ERROR: unable to read tag value\r\n");
         errorString = "unable to read value";
-        
         goto error;
     }
+
     response = parse_value( value );    
-    UA_Variant_delete(value);
     if (response == NULL){
+        errorString = "invalid value";
         goto error;
     }
+
+    UA_Variant_delete(value);
+
     return on_ok( response );
 
 error:
@@ -207,7 +212,7 @@ cJSON* opcua_client_write(cJSON* request){
     char *errorString = NULL;
     cJSON *response = NULL;
     UA_Variant *ua_value = UA_Variant_new();
-    fprintf(stdout,"DEBUG: writing\r\n");
+    LOGDEBUG("DEBUG: writing\r\n");
 
     cJSON *tag = cJSON_GetObjectItemCaseSensitive(request, "tag");
     cJSON *value = cJSON_GetObjectItemCaseSensitive(request, "value");
@@ -254,45 +259,120 @@ error:
 
 cJSON* opcua_client_subscribe(cJSON* request){
     char *errorString = NULL;
-    UA_Variant *value = UA_Variant_new();
     cJSON *response = NULL;
-    fprintf(stdout,"DEBUG: subscribing\r\n");
+    char *path = NULL;
+    LOGDEBUG("DEBUG: subscribing\r\n");
 
-    UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-    int ret = path2nodeId( request, &nodeId );
-    if (ret != 0){
-        errorString = "invalid node path";
+    // Get the key to the binding
+    path = path2string( request );
+    if (path == NULL){
+        errorString = "unable to convert the node path to string";
         goto error;
     }
 
-    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(nodeId);
- 
-    UA_MonitoredItemCreateResult monResponse =
-    UA_Client_MonitoredItems_createDataChange(opcua_client, subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
-                                              monRequest, NULL, on_subscription_update, NULL);
+    // Lookup the binding in the collection
+    opcua_client_binding *b = NULL;
+    opcua_client_subscription *s = NULL;
+    HASH_FIND_STR(opcua_client_bindings, path, b);
 
-    fprintf(stdout,"DEBUG: monResponse.monitoredItemId %d\r\n", monResponse.monitoredItemId);
+    if (b == NULL){
+        // The binding is not in the collection yet.
+        // Create a new subscription.
+        LOGDEBUG("DEBUG: create a new subscription\r\n");
 
-    if(monResponse.statusCode != UA_STATUSCODE_GOOD){
-        errorString = "uanble to add a monitored item";
+        // Get nodeId
+        UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+        int ret = path2nodeId( request, &nodeId );
+        if (ret != 0){
+            errorString = "invalid node path";
+            goto error;
+        }
+
+        // Add the binding to the monitored items
+        UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(nodeId);
+        UA_MonitoredItemCreateResult monResponse =
+        UA_Client_MonitoredItems_createDataChange(opcua_client, subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
+                                                monRequest, NULL, on_subscription_update, NULL);
+
+        LOGDEBUG("DEBUG: monResponse.monitoredItemId %d\r\n", monResponse.monitoredItemId);
+
+        if(monResponse.statusCode != UA_STATUSCODE_GOOD){
+            errorString = "uanble to add a monitored item";
+            goto error;
+        }
+
+        // Add the binding to the collection
+        b = (opcua_client_binding *)malloc(sizeof *b);
+        if (b == NULL){
+            errorString = "uanble to allocate the memory for a new binding index";
+            goto error;
+        }
+        b->path = path;
+        b->id = monResponse.monitoredItemId;
+
+        s = (opcua_client_subscription *)malloc(sizeof *s);
+        if (s == NULL){
+            errorString = "unable to allocate the memory for new binding";
+            goto error;
+        }
+        s->id = monResponse.monitoredItemId;
+        s->value = UA_Variant_new();
+        
+        HASH_ADD_STR(opcua_client_bindings, path, b);
+        HASH_ADD_INT(opcua_client_subscriptions, id, s);
+
+        // Trigger an update. This should lead to on_subscription_update
+        // that is going to update the value in the s 
+        UA_Client_run_iterate(opcua_client, 10);
+    }else{
+        free( path );
+        // The binding is already in the active subscriptions
+        LOGDEBUG("DEBUG: lookup the value in the active subscriptions\r\n");
+
+        // Lookup the value
+        HASH_FIND_INT(opcua_client_subscriptions, &b->id, s);
+        if (s == NULL){
+            errorString = "invalid subscription index";
+            goto error;
+        }
+    }
+
+    response = parse_value( s->value );
+    if (response == NULL){
+        errorString = "invalid value";
         goto error;
     }
- 
-    /* The first publish request should return the initial value of the variable */
-    UA_Client_run_iterate(opcua_client, 10);
 
-    response = cJSON_CreateString("ok");
-
-    // response = parse_value( value );    
-    // UA_Variant_delete(value);
-    // if (response == NULL){
-    //     goto error;
-    // }
     return on_ok( response );
 
 error:
-    UA_Variant_delete(value);
+    if (path != NULL){
+        free(path);
+    }
     cJSON_Delete( response );
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_read";
+    }
+    return on_error( errorString );
+}
+
+cJSON* opcua_client_update_subscriptions(cJSON* request){
+    char *errorString;
+    cJSON* response = NULL;
+
+    if (UA_Client_run_iterate(opcua_client, 10) != UA_STATUSCODE_GOOD){
+        errorString = "unable update subscriptions";
+        goto error;
+    }
+
+    response = cJSON_CreateString("ok");
+    if (response == NULL){
+        errorString = "unable to allocate response";
+        goto error;
+    }
+
+    return on_ok( response );
+error:
     if (errorString == NULL){
         errorString = "programming error in opcua_client_read";
     }
@@ -322,7 +402,7 @@ cJSON* opcua_client_browse_endpoints(cJSON* request){
         goto error;
     }
     sprintf(connectionString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
-    fprintf(stdout,"DEBUG: connectionString %s\r\n",connectionString);
+    LOGDEBUG("DEBUG: connectionString %s\r\n",connectionString);
 
     // Request endpoints
     retval = UA_Client_getEndpoints(opcua_client, connectionString, &endpointArraySize, &endpointArray);
@@ -330,7 +410,7 @@ cJSON* opcua_client_browse_endpoints(cJSON* request){
         errorString = "connection error";
         goto error;
     }
-    fprintf(stdout,"DEBUG: %i endpoints found\r\n",(int)endpointArraySize);
+    LOGDEBUG("DEBUG: %i endpoints found\r\n",(int)endpointArraySize);
 
     // Build the response
     response = cJSON_CreateArray();
@@ -414,7 +494,7 @@ cJSON* browse_folder( UA_NodeId folder ){
     // Execute the request
     UA_BrowseResponse response = UA_Client_Service_browse(opcua_client, request);
     if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        fprintf(stdout,"ERROR: UA_Client_Service_browse error\r\n");
+        LOGERROR("ERROR: UA_Client_Service_browse error\r\n");
         goto error;
     }
 
@@ -427,20 +507,20 @@ cJSON* browse_folder( UA_NodeId folder ){
 
             // Convert the nodeId to string
             if (UA_NodeId_print(&ref->nodeId.nodeId, &nodeId) != UA_STATUSCODE_GOOD){
-                fprintf(stdout,"ERROR: unable to serialize nodeId in browse_folder\r\n");
+                LOGERROR("ERROR: unable to serialize nodeId in browse_folder\r\n");
                 goto error; 
             }
 
             // // Convert referenceType to string
             // if (UA_NodeId_print(&ref->referenceTypeId, &referenceTypeId) != UA_STATUSCODE_GOOD){
-            //     fprintf(stdout,"ERROR: unable to serialize referenceTypeId in browse_folder\r\n");
+            //     LOGERROR("ERROR: unable to serialize referenceTypeId in browse_folder\r\n");
             //     goto error; 
             // }
             // TODO. Include referenceTypeId to the result to be able to distinguish between folders and leaves
-            //fprintf(stdout,"DEBUG: referenceTypeId %s\r\n", referenceTypeId.data);
+            //LOGDEBUG("DEBUG: referenceTypeId %s\r\n", referenceTypeId.data);
             
             if (cJSON_AddStringToObject(result, (char *)ref->displayName.text.data, (char *)nodeId.data) == NULL) {
-                fprintf(stdout,"ERROR: unable to add a node the result in browse_folder\r\n");
+                LOGERROR("ERROR: unable to add a node the result in browse_folder\r\n");
                 UA_String_clear(&nodeId);
                 //UA_String_clear(&referenceTypeId);
                 goto error; 
@@ -473,19 +553,19 @@ int path2nodeId( cJSON *path, UA_NodeId *node ){
     cJSON_ArrayForEach(level, path) {
         content = browse_folder( *node );
         if (content == NULL){
-            fprintf(stdout,"ERROR: path2nodeId unable to browse folder\r\n");
+            LOGERROR("ERROR: path2nodeId unable to browse folder\r\n");
             goto error;
         }
 
         // Lookup node by name
         next = cJSON_GetObjectItemCaseSensitive(content, level->valuestring );
         if (!cJSON_IsString(next) || (next->valuestring == NULL)){
-            fprintf(stdout,"ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
+            LOGERROR("ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
             goto error;
         }
 
         if (UA_NodeId_parse(node, UA_STRING((char*)(uintptr_t)next->valuestring)) != UA_STATUSCODE_GOOD){
-            fprintf(stdout,"ERROR: path2nodeId unable to parse nodeId %s\r\n",next->valuestring);
+            LOGERROR("ERROR: path2nodeId unable to parse nodeId %s\r\n",next->valuestring);
             goto error;
         }
         cJSON_Delete( content );
@@ -496,6 +576,42 @@ int path2nodeId( cJSON *path, UA_NodeId *node ){
 error:
     cJSON_Delete( content );
     return -1;
+}
+
+char* path2string( cJSON *path ){
+    cJSON *level = NULL;
+    int length = 0;
+    char *result = NULL;
+
+    // Get the required size 
+    cJSON_ArrayForEach(level, path) {
+        length += 1 + strlen( level->valuestring );
+    }
+
+    // Allocate the string
+    result = malloc( length );
+    if (result == NULL){
+        LOGERROR("ERROR: unable to allocate the memory for path string\r\n");
+        goto error;
+    }
+
+    // Join
+    strcpy(result, "");
+    level = NULL;
+    cJSON_ArrayForEach(level, path) {
+        strcat(result, "/");
+        strcat(result, level->valuestring);
+    }
+
+    LOGDEBUG("DEBUG: path2string %s\r\n", result);
+
+    return result;
+
+error:
+    if (result != NULL){
+        free(result);
+    }
+    return NULL;
 }
 
 cJSON* parse_value( UA_Variant *ua_value ){
@@ -626,292 +742,47 @@ int init_subscriptions(){
  
     subscriptionId = response.subscriptionId;
     if(response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        fprintf(stdout,"ERROR: unable to create a subscription request\r\n");
+        LOGERROR("ERROR: unable to create a subscription request\r\n");
         goto error;
     }
-    printf("DEBUG: Create subscription succeeded, id %u\r\n", subscriptionId);
+    LOGDEBUG("DEBUG: Create subscription succeeded, id %u\r\n", subscriptionId);
  
    return 0;
 error:
     if(UA_Client_Subscriptions_deleteSingle(opcua_client, subscriptionId) == UA_STATUSCODE_GOOD){
-        fprintf(stdout,"ERROR: unable to purge the subscription request\r\n");
+        LOGERROR("ERROR: unable to purge the subscription request\r\n");
     }
     return -1;
 }
 
 static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
                          UA_UInt32 monId, void *monContext, UA_DataValue *value) {
-    fprintf(stdout,"DEBUG: on_subscription_update\r\n");
-    fprintf(stdout,"DEBUG: subId %i\r\n",subId);
-    fprintf(stdout,"DEBUG: monId %i\r\n",monId);
 
-    cJSON *v = parse_value(&value->value);
-
-    fprintf(stdout,"DEBUG: v %d\r\n",(int)v->valuedouble);
+    // Lookup the subscription
+    opcua_client_subscription *s = NULL;
+    HASH_FIND_INT(opcua_client_subscriptions, &monId, s);
+    if (s != NULL){
+        // Update the value
+        LOGDEBUG("DEBUG: update subscription %d\r\n",monId);
+        if (UA_Variant_copy( &value->value, s->value ) != UA_STATUSCODE_GOOD){
+            LOGERROR("ERROR: unable to copy value on subscription update\r\n");
+        }
+    }
 }
 
-// #ifdef UA_ENABLE_SUBSCRIPTIONS
-// static void
-// handler_TheAnswerChanged(UA_Client *client, UA_UInt32 subId, void *subContext,
-//                          UA_UInt32 monId, void *monContext, UA_DataValue *value) {
-//     printf("The Answer has changed!\n");
-// }
-// #endif
- 
-// static UA_StatusCode
-// nodeIter(UA_NodeId childId, UA_Boolean isInverse, UA_NodeId referenceTypeId, void *handle) {
-//     if(isInverse)
-//         return UA_STATUSCODE_GOOD;
-//     UA_NodeId *parent = (UA_NodeId *)handle;
-//     printf("%d, %d --- %d ---> NodeId %d, %d\n",
-//            parent->namespaceIndex, parent->identifier.numeric,
-//            referenceTypeId.identifier.numeric, childId.namespaceIndex,
-//            childId.identifier.numeric);
-//     return UA_STATUSCODE_GOOD;
-// }
-
+//------------------------THE ENTRY POINT------------------------------------------------
 int main(int argc, char *argv[]) {
-    // Create an object
+
+    // Create the client object
     opcua_client = UA_Client_new();
     if (opcua_client == NULL){
-        fprintf(stdout,"unable to initialize the connection object\r\n");
+        LOGERROR("ERROR: unable to allocate the connection object\r\n");
         exit(EXIT_FAILURE);
     }
     UA_ClientConfig_setDefault(UA_Client_getConfig(opcua_client));
 
-    printf("enter eport_loop\r\n");
+    LOGDEBUG("DEBUG: enter eport_loop\r\n");
     eport_loop( &on_request );
-//     UA_Client *client = UA_Client_new();
-//     UA_ClientConfig_setDefault(UA_Client_getConfig(client));
- 
-//     /* Listing endpoints */
-//     UA_EndpointDescription* endpointArray = NULL;
-//     size_t endpointArraySize = 0;
-//     UA_StatusCode retval = UA_Client_getEndpoints(client, "opc.tcp://localhost:4840",
-//                                                   &endpointArraySize, &endpointArray);
-//     if(retval != UA_STATUSCODE_GOOD) {
-//         UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
-//         UA_Client_delete(client);
-//         return EXIT_FAILURE;
-//     }
-//     printf("%i endpoints found\n", (int)endpointArraySize);
-//     for(size_t i=0;i<endpointArraySize;i++) {
-//         printf("URL of endpoint %i is %.*s\n", (int)i,
-//                (int)endpointArray[i].endpointUrl.length,
-//                endpointArray[i].endpointUrl.data);
-//     }
-//     UA_Array_delete(endpointArray,endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
- 
-//     /* Connect to a server */
-//     // This one is for authorized connections
-//     //retval = UA_Client_connectUsername(client, "opc.tcp://localhost:4840", "user1", "password");
 
-//     // This one is for anonimous connections
-//     retval = UA_Client_connect(client, "opc.tcp://localhost:4840/OPCUA/SimulationServer");
-
-//     if(retval != UA_STATUSCODE_GOOD) {
-//         UA_Client_delete(client);
-//         return EXIT_FAILURE;
-//     }
- 
-//     /* Browse some objects */
-//     printf("Browsing nodes in objects folder:\n");
-//     UA_BrowseRequest bReq;
-//     UA_BrowseRequest_init(&bReq);
-//     bReq.requestedMaxReferencesPerNode = 0;
-//     bReq.nodesToBrowse = UA_BrowseDescription_new();
-//     bReq.nodesToBrowseSize = 1;
-//     bReq.nodesToBrowse[0].nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER); /* browse objects folder */
-//     bReq.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_ALL; /* return everything */
-//     UA_BrowseResponse bResp = UA_Client_Service_browse(client, bReq);
-//     printf("%-9s %-16s %-16s %-16s\n", "NAMESPACE", "NODEID", "BROWSE NAME", "DISPLAY NAME");
-//     for(size_t i = 0; i < bResp.resultsSize; ++i) {
-//         for(size_t j = 0; j < bResp.results[i].referencesSize; ++j) {
-//             UA_ReferenceDescription *ref = &(bResp.results[i].references[j]);
-//             if(ref->nodeId.nodeId.identifierType == UA_NODEIDTYPE_NUMERIC) {
-//                 printf("%-9d %-16d %-16.*s %-16.*s\n", ref->nodeId.nodeId.namespaceIndex,
-//                        ref->nodeId.nodeId.identifier.numeric, (int)ref->browseName.name.length,
-//                        ref->browseName.name.data, (int)ref->displayName.text.length,
-//                        ref->displayName.text.data);
-//             } else if(ref->nodeId.nodeId.identifierType == UA_NODEIDTYPE_STRING) {
-//                 printf("%-9d %-16.*s %-16.*s %-16.*s\n", ref->nodeId.nodeId.namespaceIndex,
-//                        (int)ref->nodeId.nodeId.identifier.string.length,
-//                        ref->nodeId.nodeId.identifier.string.data,
-//                        (int)ref->browseName.name.length, ref->browseName.name.data,
-//                        (int)ref->displayName.text.length, ref->displayName.text.data);
-//             }
-//             /* TODO: distinguish further types */
-//         }
-//     }
-//     UA_BrowseRequest_clear(&bReq);
-//     UA_BrowseResponse_clear(&bResp);
- 
-//     /* Same thing, this time using the node iterator... */
-//     UA_NodeId *parent = UA_NodeId_new();
-//     *parent = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-//     UA_Client_forEachChildNodeCall(client, UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER),
-//                                    nodeIter, (void *) parent);
-//     UA_NodeId_delete(parent);
- 
-// #ifdef UA_ENABLE_SUBSCRIPTIONS
-//     /* Create a subscription */
-//     UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
-//     UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(client, request,
-//                                                                             NULL, NULL, NULL);
- 
-//     UA_UInt32 subId = response.subscriptionId;
-//     if(response.responseHeader.serviceResult == UA_STATUSCODE_GOOD)
-//         printf("Create subscription succeeded, id %u\n", subId);
- 
-//     UA_MonitoredItemCreateRequest monRequest =
-//         UA_MonitoredItemCreateRequest_default(UA_NODEID_STRING(1, "the.answer"));
- 
-//     UA_MonitoredItemCreateResult monResponse =
-//     UA_Client_MonitoredItems_createDataChange(client, response.subscriptionId,
-//                                               UA_TIMESTAMPSTORETURN_BOTH,
-//                                               monRequest, NULL, handler_TheAnswerChanged, NULL);
-//     if(monResponse.statusCode == UA_STATUSCODE_GOOD)
-//         printf("Monitoring 'the.answer', id %u\n", monResponse.monitoredItemId);
- 
- 
-//     /* The first publish request should return the initial value of the variable */
-//     UA_Client_run_iterate(client, 1000);
-// #endif
- 
-//     /* Read attribute */
-//     UA_Int32 value = 0;
-//     printf("\nReading the value of node (1, \"the.answer\"):\n");
-//     UA_Variant *val = UA_Variant_new();
-//     retval = UA_Client_readValueAttribute(client, UA_NODEID_STRING(1, "the.answer"), val);
-//     if(retval == UA_STATUSCODE_GOOD && UA_Variant_isScalar(val) &&
-//        val->type == &UA_TYPES[UA_TYPES_INT32]) {
-//             value = *(UA_Int32*)val->data;
-//             printf("the value is: %i\n", value);
-//     }
-//     UA_Variant_delete(val);
- 
-//     /* Write node attribute */
-//     value++;
-//     printf("\nWriting a value of node (1, \"the.answer\"):\n");
-//     UA_WriteRequest wReq;
-//     UA_WriteRequest_init(&wReq);
-//     wReq.nodesToWrite = UA_WriteValue_new();
-//     wReq.nodesToWriteSize = 1;
-//     wReq.nodesToWrite[0].nodeId = UA_NODEID_STRING_ALLOC(1, "the.answer");
-//     wReq.nodesToWrite[0].attributeId = UA_ATTRIBUTEID_VALUE;
-//     wReq.nodesToWrite[0].value.hasValue = true;
-//     wReq.nodesToWrite[0].value.value.type = &UA_TYPES[UA_TYPES_INT32];
-//     wReq.nodesToWrite[0].value.value.storageType = UA_VARIANT_DATA_NODELETE; /* do not free the integer on deletion */
-//     wReq.nodesToWrite[0].value.value.data = &value;
-//     UA_WriteResponse wResp = UA_Client_Service_write(client, wReq);
-//     if(wResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD)
-//             printf("the new value is: %i\n", value);
-//     UA_WriteRequest_clear(&wReq);
-//     UA_WriteResponse_clear(&wResp);
- 
-//     /* Write node attribute (using the highlevel API) */
-//     value++;
-//     UA_Variant *myVariant = UA_Variant_new();
-//     UA_Variant_setScalarCopy(myVariant, &value, &UA_TYPES[UA_TYPES_INT32]);
-//     UA_Client_writeValueAttribute(client, UA_NODEID_STRING(1, "the.answer"), myVariant);
-//     UA_Variant_delete(myVariant);
- 
-// #ifdef UA_ENABLE_SUBSCRIPTIONS
-//     /* Take another look at the.answer */
-//     UA_Client_run_iterate(client, 100);
-//     /* Delete the subscription */
-//     if(UA_Client_Subscriptions_deleteSingle(client, subId) == UA_STATUSCODE_GOOD)
-//         printf("Subscription removed\n");
-// #endif
- 
-// #ifdef UA_ENABLE_METHODCALLS
-//     /* Call a remote method */
-//     UA_Variant input;
-//     UA_String argString = UA_STRING("Hello Server");
-//     UA_Variant_init(&input);
-//     UA_Variant_setScalarCopy(&input, &argString, &UA_TYPES[UA_TYPES_STRING]);
-//     size_t outputSize;
-//     UA_Variant *output;
-//     retval = UA_Client_call(client, UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER),
-//                             UA_NODEID_NUMERIC(1, 62541), 1, &input, &outputSize, &output);
-//     if(retval == UA_STATUSCODE_GOOD) {
-//         printf("Method call was successful, and %lu returned values available.\n",
-//                (unsigned long)outputSize);
-//         UA_Array_delete(output, outputSize, &UA_TYPES[UA_TYPES_VARIANT]);
-//     } else {
-//         printf("Method call was unsuccessful, and %x returned values available.\n", retval);
-//     }
-//     UA_Variant_clear(&input);
-// #endif
- 
-// #ifdef UA_ENABLE_NODEMANAGEMENT
-//     /* Add new nodes*/
-//     /* New ReferenceType */
-//     UA_NodeId ref_id;
-//     UA_ReferenceTypeAttributes ref_attr = UA_ReferenceTypeAttributes_default;
-//     ref_attr.displayName = UA_LOCALIZEDTEXT("en-US", "NewReference");
-//     ref_attr.description = UA_LOCALIZEDTEXT("en-US", "References something that might or might not exist");
-//     ref_attr.inverseName = UA_LOCALIZEDTEXT("en-US", "IsNewlyReferencedBy");
-//     retval = UA_Client_addReferenceTypeNode(client,
-//                                             UA_NODEID_NUMERIC(1, 12133),
-//                                             UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES),
-//                                             UA_NODEID_NUMERIC(0, UA_NS0ID_HASSUBTYPE),
-//                                             UA_QUALIFIEDNAME(1, "NewReference"),
-//                                             ref_attr, &ref_id);
-//     if(retval == UA_STATUSCODE_GOOD )
-//         printf("Created 'NewReference' with numeric NodeID %u\n", ref_id.identifier.numeric);
- 
-//     /* New ObjectType */
-//     UA_NodeId objt_id;
-//     UA_ObjectTypeAttributes objt_attr = UA_ObjectTypeAttributes_default;
-//     objt_attr.displayName = UA_LOCALIZEDTEXT("en-US", "TheNewObjectType");
-//     objt_attr.description = UA_LOCALIZEDTEXT("en-US", "Put innovative description here");
-//     retval = UA_Client_addObjectTypeNode(client,
-//                                          UA_NODEID_NUMERIC(1, 12134),
-//                                          UA_NODEID_NUMERIC(0, UA_NS0ID_BASEOBJECTTYPE),
-//                                          UA_NODEID_NUMERIC(0, UA_NS0ID_HASSUBTYPE),
-//                                          UA_QUALIFIEDNAME(1, "NewObjectType"),
-//                                          objt_attr, &objt_id);
-//     if(retval == UA_STATUSCODE_GOOD)
-//         printf("Created 'NewObjectType' with numeric NodeID %u\n", objt_id.identifier.numeric);
- 
-//     /* New Object */
-//     UA_NodeId obj_id;
-//     UA_ObjectAttributes obj_attr = UA_ObjectAttributes_default;
-//     obj_attr.displayName = UA_LOCALIZEDTEXT("en-US", "TheNewGreatNode");
-//     obj_attr.description = UA_LOCALIZEDTEXT("de-DE", "Hier koennte Ihre Webung stehen!");
-//     retval = UA_Client_addObjectNode(client,
-//                                      UA_NODEID_NUMERIC(1, 0),
-//                                      UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER),
-//                                      UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES),
-//                                      UA_QUALIFIEDNAME(1, "TheGreatNode"),
-//                                      UA_NODEID_NUMERIC(1, 12134),
-//                                      obj_attr, &obj_id);
-//     if(retval == UA_STATUSCODE_GOOD )
-//         printf("Created 'NewObject' with numeric NodeID %u\n", obj_id.identifier.numeric);
- 
-//     /* New Integer Variable */
-//     UA_NodeId var_id;
-//     UA_VariableAttributes var_attr = UA_VariableAttributes_default;
-//     var_attr.displayName = UA_LOCALIZEDTEXT("en-US", "TheNewVariableNode");
-//     var_attr.description =
-//         UA_LOCALIZEDTEXT("en-US", "This integer is just amazing - it has digits and everything.");
-//     UA_Int32 int_value = 1234;
-//     /* This does not copy the value */
-//     UA_Variant_setScalar(&var_attr.value, &int_value, &UA_TYPES[UA_TYPES_INT32]);
-//     var_attr.dataType = UA_TYPES[UA_TYPES_INT32].typeId;
-//     retval = UA_Client_addVariableNode(client,
-//                                        UA_NODEID_NUMERIC(1, 0), // Assign new/random NodeID
-//                                        UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER),
-//                                        UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES),
-//                                        UA_QUALIFIEDNAME(0, "VariableNode"),
-//                                        UA_NODEID_NULL, // no variable type
-//                                        var_attr, &var_id);
-//     if(retval == UA_STATUSCODE_GOOD )
-//         printf("Created 'NewVariable' with numeric NodeID %u\n", var_id.identifier.numeric);
-// #endif
- 
-//     UA_Client_disconnect(client);
-//     UA_Client_delete(client);
     return EXIT_SUCCESS;
 }

@@ -48,7 +48,7 @@ void eport_loop(eport_request_handler callback){
         }
 
         // Handle the request with the callback
-        fprintf(stdout,"DEBUG: message received: %s\r\n",(char *)request);
+        LOGDEBUG("DEBUG: message received: %s\r\n",(char *)request);
         response = (byte *)callback( (char *)request );
         // request is not needed any longer, free its memory
         free(request);
@@ -58,7 +58,7 @@ void eport_loop(eport_request_handler callback){
             response = (byte *)"programming error: NULL response";
         }
         len = strlen( (char *)response );
-        fprintf(stdout,"DEBUG: reply with %s\r\n",response);
+        LOGDEBUG("DEBUG: reply with %s\r\n",response);
         write_cmd( response, len );
         free( response );
     }
@@ -103,7 +103,7 @@ int read_cmd(byte **buf) {
     for (i = 0; i < HEADER_LENGTH; i++){
         len = len | (lbuf[i] << (8 * (HEADER_LENGTH - i -1)) );
     }
-    fprintf(stdout,"DEBUG: received length: %d\r\n",len);
+    LOGDEBUG("DEBUG: received length: %d\r\n",len);
 
     // Step 2. Read the message itself
     *buf = malloc(len); // dynamically allocate the memory for the message
