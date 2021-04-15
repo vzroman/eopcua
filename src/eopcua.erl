@@ -37,11 +37,15 @@
     subscribe/2,subscribe/3,
     update_subscriptions/1,update_subscriptions/2,
     browse_endpoints/2,browse_endpoints/3,
-    browse_folder/2,browse_folder/3
+    browse_folder/2,browse_folder/3,
+    items_tree/1,items_tree/2
 ]).
 
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
+
+-define(FOLDER_TYPE,1).
+-define(TAG_TYPE,2).
 
 -define(HEADER_LENGTH,4).
 
@@ -111,6 +115,32 @@ browse_folder(PID, Path)->
     browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
 browse_folder(PID, Path, Timeout)->
     transaction( PID, <<"browse_folder">>, Path, Timeout ).  
+
+items_tree(PID)->
+    items_tree(PID, ?RESPONSE_TIMEOUT).
+items_tree(PID, Timeout)->
+    try
+        {ok, items_tree(PID,Timeout,_Path = [])}
+    catch
+        _:Error-> {error, Error}
+    end.
+items_tree(PID,Timeout,Path)->
+    case browse_folder(PID,Path,Timeout) of
+        {ok,Items}->
+            maps:fold(fun(Name,Item,Acc)->
+                case Item of
+                    #{<<"type">> := ?FOLDER_TYPE,<<"id">>:=ID}->
+                        Acc#{Name => #{<<"id">>=>ID, <<"children">>=> items_tree(PID,Timeout,Path ++ [Name])}};
+                    #{<<"type">> := ?TAG_TYPE,<<"id">>:=ID}->
+                        Acc#{Name => ID};
+                    _->
+                        % Ignore other types
+                        Acc
+                end    
+            end,#{},Items);
+        {error,Error}->
+            throw(Error)
+    end.    
 
 transaction( PID, Command, Body, Timeout )->
     TID = rand:uniform(16#FFFF),

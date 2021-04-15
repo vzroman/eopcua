@@ -479,9 +479,10 @@ error:
 
 cJSON* browse_folder( UA_NodeId folder ){
     cJSON *result = NULL;
+    cJSON *subitem = NULL;
     UA_String nodeId;
-    //UA_String referenceTypeId;
 
+    LOGDEBUG("DEBUG:-----------------browse folder-------------------------\r\n");
     // Build the request
     UA_BrowseRequest request;
     UA_BrowseRequest_init(&request);
@@ -511,22 +512,33 @@ cJSON* browse_folder( UA_NodeId folder ){
                 goto error; 
             }
 
-            // // Convert referenceType to string
-            // if (UA_NodeId_print(&ref->referenceTypeId, &referenceTypeId) != UA_STATUSCODE_GOOD){
-            //     LOGERROR("ERROR: unable to serialize referenceTypeId in browse_folder\r\n");
-            //     goto error; 
-            // }
-            // TODO. Include referenceTypeId to the result to be able to distinguish between folders and leaves
-            //LOGDEBUG("DEBUG: referenceTypeId %s\r\n", referenceTypeId.data);
+            LOGDEBUG("DEBUG: node %s ref->nodeClass %d\r\n",(char *)ref->displayName.text.data,ref->nodeClass);
+
+            subitem = cJSON_CreateObject();
+            if(subitem == NULL){
+                LOGERROR("ERROR: unable to allocate subitem\r\n");
+                goto error;
+            }
             
-            if (cJSON_AddStringToObject(result, (char *)ref->displayName.text.data, (char *)nodeId.data) == NULL) {
-                LOGERROR("ERROR: unable to add a node the result in browse_folder\r\n");
+            if (cJSON_AddStringToObject(subitem,"id", (char *)nodeId.data) == NULL) {
+                LOGERROR("ERROR: unable to add a nodeId the result in browse_folder\r\n");
                 UA_String_clear(&nodeId);
-                //UA_String_clear(&referenceTypeId);
                 goto error; 
             }
+
+            if (cJSON_AddNumberToObject(subitem,"type", ref->nodeClass) == NULL) {
+                LOGERROR("ERROR: unable to add a type the result in browse_folder\r\n");
+                UA_String_clear(&nodeId);
+                goto error; 
+            }
+
+            if (!cJSON_AddItemToObject(result, (char *)ref->displayName.text.data, subitem)) {
+                LOGERROR("ERROR: unable to add a node the result in browse_folder\r\n");
+                UA_String_clear(&nodeId);
+                goto error; 
+            }
+
             UA_String_clear(&nodeId);
-            //UA_String_clear(&referenceTypeId);
         }
     }
     UA_BrowseRequest_clear(&request);
@@ -535,6 +547,7 @@ cJSON* browse_folder( UA_NodeId folder ){
     return result;
 
 error:
+    cJSON_Delete( subitem );
     cJSON_Delete( result );
     UA_BrowseRequest_clear(&request);
     UA_BrowseResponse_clear(&response);
@@ -559,6 +572,11 @@ int path2nodeId( cJSON *path, UA_NodeId *node ){
 
         // Lookup node by name
         next = cJSON_GetObjectItemCaseSensitive(content, level->valuestring );
+        if (!cJSON_IsObject(next)){
+            LOGERROR("ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
+            goto error;
+        }
+        next = cJSON_GetObjectItemCaseSensitive(next, "id" );
         if (!cJSON_IsString(next) || (next->valuestring == NULL)){
             LOGERROR("ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
             goto error;
