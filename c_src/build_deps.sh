@@ -5,13 +5,12 @@ open62541_VSN="v1.2"
 
 set -e
 
-if [ `basename $PWD` != "c_src" ]; then
-    # originally "pushd c_src" of bash
-    # but no need to use directory stack push here
-    cd c_src
-fi
+# the script folder
+DIR=$PWD
+BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-BASEDIR="$PWD"
+# dive into c_src
+cd $BASEDIR
 
 # detecting gmake and if exists use it
 # if not use make
@@ -55,3 +54,5 @@ case "$1" in
         
         ;;
 esac
+
+cd $DIR
