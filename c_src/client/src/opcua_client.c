@@ -321,9 +321,10 @@ cJSON* opcua_client_subscribe(cJSON* request){
         HASH_ADD_STR(opcua_client_bindings, path, b);
         HASH_ADD_INT(opcua_client_subscriptions, id, s);
 
-        // Trigger an update. This should lead to on_subscription_update
-        // that is going to update the value in the s 
-        UA_Client_run_iterate(opcua_client, 10);
+        // The subscription is already created, we should not clear the path from this moment
+        path = NULL;
+
+        return opcua_client_read( request );
     }else{
         free( path );
         // The binding is already in the active subscriptions
@@ -335,12 +336,12 @@ cJSON* opcua_client_subscribe(cJSON* request){
             errorString = "invalid subscription index";
             goto error;
         }
-    }
 
-    response = parse_value( s->value );
-    if (response == NULL){
-        errorString = "invalid value";
-        goto error;
+        response = parse_value( s->value );
+        if (response == NULL){
+            errorString = "invalid value";
+            goto error;
+        }
     }
 
     return on_ok( response );
