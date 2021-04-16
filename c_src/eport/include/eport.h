@@ -28,7 +28,7 @@
 #define OUT_DESC 4
 
 // Debug info
-//#define EPORT_DEBUG 1
+#define EPORT_DEBUG 1
 
 #ifdef EPORT_DEBUG
 
