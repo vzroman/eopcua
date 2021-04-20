@@ -29,4 +29,18 @@ Example
     
     {ok,<<"ok">>} = eopcua:update_subscriptions(Port).
     
+Secured connection
+-----
+    // Generate certificate
+    openssl req -new -x509  -config example.cert.config -newkey rsa:2048 -keyout eopcua.key -nodes -outform der -out eopcua.der
+    
+    {ok,<<"ok">>} = eopcua:connect(Port, #{ 
+        host=> <<"localhost">>, 
+        port => 4840, 
+        endpoint => <<"OPCUA/SimulationServer">>, 
+        login => <<"test_user">>, 
+        password => <<"111111">> 
+    }).
+    
+    
     
