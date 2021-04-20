@@ -45,6 +45,8 @@ int init_subscriptions(void);
 static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
                          UA_UInt32 monId, void *monContext, UA_DataValue *value);
 
+UA_ByteString* loadFile(const char* path);
+
 // Global variables
 UA_Client *opcua_client;
 UA_UInt32 subscriptionId;
@@ -127,6 +129,8 @@ cJSON* opcua_client_connect(cJSON* request){
     char *errorString = NULL;
     UA_StatusCode retval;
 
+    UA_ClientConfig *config = UA_Client_getConfig(opcua_client);
+
     // Connection params
     cJSON *url = cJSON_GetObjectItemCaseSensitive(request, "url");
     cJSON *login = cJSON_GetObjectItemCaseSensitive(request, "login");
@@ -139,9 +143,40 @@ cJSON* opcua_client_connect(cJSON* request){
     if (login != NULL && password != NULL){
         // Authorized access
         LOGDEBUG("DEBUG: connecting to %s, user %s\r\n", url->valuestring,login->valuestring);
+        
+        // UA_ByteString* certificate = loadFile("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/edge.cert.der");
+	    // UA_ByteString* privateKey = loadFile("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/edge.key.pem");
+
+        UA_ByteString* certificate = loadFile("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.der");
+	    UA_ByteString* privateKey = loadFile("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.pem");        
+
+        // Trust list
+        size_t trustListSize = 0;
+        UA_STACKARRAY(UA_ByteString, trustList, trustListSize);
+
+        // Revocation list
+        UA_ByteString *revocationList = NULL;
+        size_t revocationListSize = 0;
+
+        LOGDEBUG("DEBUG: UA_MESSAGESECURITYMODE_SIGNANDENCRYPT\r\n");
+
+        config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
+        UA_ClientConfig_setDefaultEncryption(config, *certificate, *privateKey,
+                                            trustList, trustListSize,
+                                            revocationList, revocationListSize);
+
+        config->clientDescription.applicationName = UA_LOCALIZEDTEXT_ALLOC("en", "eopcua");
+        config->clientDescription.applicationType = UA_APPLICATIONTYPE_CLIENT;
+        config->clientDescription.applicationUri = UA_STRING_ALLOC("urn:faceplate.io:Faceplate:opcuadriver");
+
+        UA_ByteString_clear(certificate);
+        UA_ByteString_clear(privateKey);
+
         retval = UA_Client_connectUsername(opcua_client, url->valuestring, login->valuestring, password->valuestring);
     }else{
         LOGDEBUG("DEBUG: connecting to %s\r\n", url->valuestring);
+
+        UA_ClientConfig_setDefault(config);
         retval = UA_Client_connect(opcua_client, url->valuestring);
     }
 
@@ -381,6 +416,7 @@ error:
 }
 
 cJSON* opcua_client_browse_endpoints(cJSON* request){
+    UA_Client *client = NULL;
     cJSON *response = NULL;
     cJSON *endpoint = NULL;
     char *errorString = NULL;
@@ -405,12 +441,21 @@ cJSON* opcua_client_browse_endpoints(cJSON* request){
     sprintf(connectionString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
     LOGDEBUG("DEBUG: connectionString %s\r\n",connectionString);
 
+    // Create a connection
+    client = UA_Client_new();
+    if (client == NULL){
+        LOGERROR("ERROR: unable to allocate the client\r\n");
+        goto error;
+    }
+    UA_ClientConfig_setDefault(UA_Client_getConfig(client));
+
     // Request endpoints
-    retval = UA_Client_getEndpoints(opcua_client, connectionString, &endpointArraySize, &endpointArray);
+    retval = UA_Client_getEndpoints(client, connectionString, &endpointArraySize, &endpointArray);
     if(retval != UA_STATUSCODE_GOOD) {
         errorString = "connection error";
         goto error;
     }
+    UA_Client_delete(client);
     LOGDEBUG("DEBUG: %i endpoints found\r\n",(int)endpointArraySize);
 
     // Build the response
@@ -442,6 +487,9 @@ error:
     }
     if (endpointArray != NULL){
         UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
+    }
+    if(client != NULL){
+        UA_Client_delete(client);
     }
     cJSON_Delete( endpoint );
     cJSON_Delete( response );
@@ -789,6 +837,24 @@ static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *sub
     }
 }
 
+UA_ByteString* loadFile(const char* path){
+	FILE* f = fopen(path, "rb");
+	if (f == NULL){
+        return NULL;
+    }
+	fseek(f, 0, SEEK_END);
+	long fsize = ftell(f);
+	fseek(f, 0, SEEK_SET); 
+
+	UA_ByteString* result = UA_ByteString_new();
+	UA_ByteString_allocBuffer(result, (size_t)fsize + 1);
+	memset(result->data, 0, result->length);
+	fread(result->data, result->length, 1, f);
+	fclose(f);
+
+	return result;
+}
+
 //------------------------THE ENTRY POINT------------------------------------------------
 int main(int argc, char *argv[]) {
 
@@ -798,7 +864,6 @@ int main(int argc, char *argv[]) {
         LOGERROR("ERROR: unable to allocate the connection object\r\n");
         exit(EXIT_FAILURE);
     }
-    UA_ClientConfig_setDefault(UA_Client_getConfig(opcua_client));
 
     LOGDEBUG("DEBUG: enter eport_loop\r\n");
     eport_loop( &on_request );

@@ -81,6 +81,7 @@ stop(PID) ->
 %         login => <<"user1">>,
 %         password => <<"secret">>
 %     }
+% {ok,<<"ok">>} = eopcua:connect(Port, #{ host=> <<"localhost">>, port => 4840, endpoint => <<"OPCUA/SimulationServer">>, <<"login">> => <<"test_user">>, <<"password">> => <<"111111">> }).
 connect(PID, Params)->
     connect(PID, Params,?RESPONSE_TIMEOUT).
 connect(PID, Params, Timeout)->
