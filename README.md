@@ -34,6 +34,8 @@ Secured connection
     // Generate certificate
     openssl req -new -x509  -config example.cert.config -newkey rsa:2048 -keyout eopcua.key -nodes -outform der -out eopcua.der
     
+    // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
+    
     {ok,<<"ok">>} = eopcua:connect(Port, #{ 
         host=> <<"localhost">>, 
         port => 4840, 
