@@ -15,14 +15,24 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-
+//----------------------------------------
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+//----------------------------------------
 #include <open62541/client_config_default.h>
 #include <open62541/client_highlevel.h>
 #include <open62541/client_subscriptions.h>
 #include <open62541/plugin/log_stdout.h>
+//----------------------------------------
+#include <openssl/x509v3.h>
+#include <openssl/bn.h>
+#include <openssl/asn1.h>
+#include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/pem.h>
+#include <openssl/bio.h>
+//----------------------------------------
 #include "opcua_client.h"
 #include "opcua_client_protocol.h"
  
@@ -45,6 +55,10 @@ int init_subscriptions(void);
 static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
                          UA_UInt32 monId, void *monContext, UA_DataValue *value);
 
+UA_ByteString* loadFile(const char* path);
+UA_ByteString* parse_base64( char* base64string );
+char* parse_certificate_uri( const unsigned char *certificate, size_t len );
+
 // Global variables
 UA_Client *opcua_client;
 UA_UInt32 subscriptionId;
@@ -56,37 +70,38 @@ opcua_client_subscription *opcua_client_subscriptions = NULL;
 char* on_request( char *requestString ){
     cJSON *response;
     char *responseString;
+    OPCUA_CLIENT_REQUEST request = {};
 
     // Parse the request
     LOGDEBUG("DEBUG: parsing the request\r\n");
-    OPCUA_CLIENT_REQUEST *request = parse_request( requestString );
-
-    // Handle the request
-    LOGDEBUG("DEBUG: handle the request\r\n");
-    if (request == NULL){
+    if (parse_request( requestString, &request ) != 0){
         response = on_error("invalid request");
-    } else if( request->cmd == OPCUA_CLIENT_CONNECT ){
-        response = opcua_client_connect( request->body );
-    } else if (request->cmd == OPCUA_CLIENT_READ ){
-        response = opcua_client_read( request->body );
-    }else if (request->cmd == OPCUA_CLIENT_WRITE ){
-        response = opcua_client_write( request->body );
-    }else if (request->cmd == OPCUA_CLIENT_SUBSCRIBE ){
-        response = opcua_client_subscribe( request->body );
-    }else if (request->cmd == OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS ){
-        response = opcua_client_update_subscriptions( request->body );
-    }else if (request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
-        response = opcua_client_browse_endpoints( request->body );
-    }else if (request->cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
-        response = opcua_client_browse_folder( request->body );
-    } else{
-        response = on_error("unsupported command type");
+    }else{
+        // Handle the request
+        LOGDEBUG("DEBUG: handle the request\r\n");
+        if( request.cmd == OPCUA_CLIENT_CONNECT ){
+            response = opcua_client_connect( request.body );
+        } else if (request.cmd == OPCUA_CLIENT_READ ){
+            response = opcua_client_read( request.body );
+        }else if (request.cmd == OPCUA_CLIENT_WRITE ){
+            response = opcua_client_write( request.body );
+        }else if (request.cmd == OPCUA_CLIENT_SUBSCRIBE ){
+            response = opcua_client_subscribe( request.body );
+        }else if (request.cmd == OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS ){
+            response = opcua_client_update_subscriptions( request.body );
+        }else if (request.cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
+            response = opcua_client_browse_endpoints( request.body );
+        }else if (request.cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
+            response = opcua_client_browse_folder( request.body );
+        } else{
+            response = on_error("unsupported command type");
+        }
     }
 
     // Reply (purges the response)
-    responseString = create_response( request, response );
+    responseString = create_response( &request, response );
 
-    purge_request( request );
+    purge_request( &request );
     LOGDEBUG("DEBUG: response %s\r\n",responseString);
 
     return responseString;
@@ -127,21 +142,80 @@ cJSON* opcua_client_connect(cJSON* request){
     char *errorString = NULL;
     UA_StatusCode retval;
 
+    UA_ClientConfig *config = UA_Client_getConfig(opcua_client);
+
     // Connection params
     cJSON *url = cJSON_GetObjectItemCaseSensitive(request, "url");
+    cJSON *certificate = cJSON_GetObjectItemCaseSensitive(request, "certificate");
+    cJSON *privateKey = cJSON_GetObjectItemCaseSensitive(request, "private_key");
     cJSON *login = cJSON_GetObjectItemCaseSensitive(request, "login");
     cJSON *password = cJSON_GetObjectItemCaseSensitive(request, "password");
-    if (!cJSON_IsString(login) || (login->valuestring == NULL)){
-        login = NULL;
-        password = NULL; 
+    UA_ByteString *cert = NULL;
+    UA_ByteString *key = NULL;
+
+    char *URI = NULL;
+
+    // Configure the connection
+    if (cJSON_IsString(certificate)){
+        LOGDEBUG("DEBUG: prepare secure connection\r\n");
+
+        LOGDEBUG("DEBUG: parse base64 certificate\r\n");
+        cert = parse_base64( certificate->valuestring );
+        if (cert == NULL){
+            errorString = "unable to parse the certificate from base64";
+            goto error;
+        }
+
+        LOGDEBUG("DEBUG: parse base64 key\r\n");
+        key = parse_base64( privateKey->valuestring );
+        if (key == NULL){
+            errorString = "unable to parse the key from base64";
+            goto error;
+        }
+
+        // Parse the application URI from the certificate
+        LOGDEBUG("DEBUG: parse_certificate_uri\r\n");
+        char *URI = parse_certificate_uri( (const unsigned char *)cert->data, cert->length );   
+        if (URI == NULL){
+            errorString = "unable to parse the certificate";
+            goto error;
+        } 
+        LOGDEBUG("DEBUG: application URI: %s\r\n",URI);
+
+        // Trust list
+        size_t trustListSize = 0;
+        UA_STACKARRAY(UA_ByteString, trustList, trustListSize);
+
+        // Revocation list
+        UA_ByteString *revocationList = NULL;
+        size_t revocationListSize = 0;
+
+        LOGDEBUG("DEBUG: UA_MESSAGESECURITYMODE_SIGNANDENCRYPT\r\n");
+
+        config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
+        if (UA_ClientConfig_setDefaultEncryption(config, *cert, *key,
+                                            trustList, trustListSize,
+                                            revocationList, revocationListSize) 
+            != UA_STATUSCODE_GOOD){
+            errorString = "unable to configure a secure connection";
+            goto error;
+        };
+
+        config->clientDescription.applicationUri = UA_STRING_ALLOC(URI);
+
+        free(URI);
+        URI = NULL;
+    }else{
+        LOGDEBUG("DEBUG: unsecure connection\r\n");
+        UA_ClientConfig_setDefault(config);
     }
 
-    if (login != NULL && password != NULL){
+    if (cJSON_IsString(login)){
         // Authorized access
-        LOGDEBUG("DEBUG: connecting to %s, user %s\r\n", url->valuestring,login->valuestring);
+        LOGDEBUG("DEBUG: authorized connection to %s, user %s\r\n", url->valuestring,login->valuestring);
         retval = UA_Client_connectUsername(opcua_client, url->valuestring, login->valuestring, password->valuestring);
     }else{
-        LOGDEBUG("DEBUG: connecting to %s\r\n", url->valuestring);
+        LOGDEBUG("DEBUG: anonymous connection to %s\r\n", url->valuestring);
         retval = UA_Client_connect(opcua_client, url->valuestring);
     }
 
@@ -163,6 +237,15 @@ cJSON* opcua_client_connect(cJSON* request){
     return on_ok( response );
 
 error:
+    if (URI != NULL){
+        free(URI);
+    }
+    if (cert!= NULL){
+        UA_ByteString_clear( cert );
+    }
+    if (key!= NULL){
+        UA_ByteString_clear( key );
+    }
     cJSON_Delete( response );
     if (errorString == NULL){
         errorString = "programming error in opcua_client_connect";
@@ -381,6 +464,7 @@ error:
 }
 
 cJSON* opcua_client_browse_endpoints(cJSON* request){
+    UA_Client *client = NULL;
     cJSON *response = NULL;
     cJSON *endpoint = NULL;
     char *errorString = NULL;
@@ -405,12 +489,21 @@ cJSON* opcua_client_browse_endpoints(cJSON* request){
     sprintf(connectionString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
     LOGDEBUG("DEBUG: connectionString %s\r\n",connectionString);
 
+    // Create a connection
+    client = UA_Client_new();
+    if (client == NULL){
+        LOGERROR("ERROR: unable to allocate the client\r\n");
+        goto error;
+    }
+    UA_ClientConfig_setDefault(UA_Client_getConfig(client));
+
     // Request endpoints
-    retval = UA_Client_getEndpoints(opcua_client, connectionString, &endpointArraySize, &endpointArray);
+    retval = UA_Client_getEndpoints(client, connectionString, &endpointArraySize, &endpointArray);
     if(retval != UA_STATUSCODE_GOOD) {
         errorString = "connection error";
         goto error;
     }
+    UA_Client_delete(client);
     LOGDEBUG("DEBUG: %i endpoints found\r\n",(int)endpointArraySize);
 
     // Build the response
@@ -442,6 +535,9 @@ error:
     }
     if (endpointArray != NULL){
         UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
+    }
+    if(client != NULL){
+        UA_Client_delete(client);
     }
     cJSON_Delete( endpoint );
     cJSON_Delete( response );
@@ -789,6 +885,134 @@ static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *sub
     }
 }
 
+UA_ByteString* loadFile(const char* path){
+	FILE* f = fopen(path, "rb");
+	if (f == NULL){
+        return NULL;
+    }
+	fseek(f, 0, SEEK_END);
+	long fsize = ftell(f);
+	fseek(f, 0, SEEK_SET); 
+
+	UA_ByteString* result = UA_ByteString_new();
+	UA_ByteString_allocBuffer(result, (size_t)fsize + 1);
+	memset(result->data, 0, result->length);
+	fread(result->data, result->length, 1, f);
+	fclose(f);
+
+	return result;
+}
+
+UA_ByteString* parse_base64(char* base64string){
+    UA_ByteString *result = UA_ByteString_new();
+
+    LOGDEBUG("DEBUG: allocate UA_String for base64\r\n");
+    UA_String b64 = UA_STRING_ALLOC( base64string );
+
+    LOGDEBUG("DEBUG: parse base64 from UA_String\r\n");
+    if ( UA_ByteString_fromBase64( result, &b64 ) != UA_STATUSCODE_GOOD){
+        LOGERROR("ERROR: unable to parse base64 string\r\n");
+        goto error;
+    };
+    UA_String_clear( &b64 );
+
+	return result;
+
+error:
+    UA_ByteString_clear( result );
+    UA_String_clear( &b64 );
+    return NULL;
+}
+
+char* parse_certificate_uri( const unsigned char *certificate, size_t len ){
+    X509 *cert = NULL;
+    X509_EXTENSION *ex = NULL;
+    BIO *ext_bio = NULL;
+    BUF_MEM *bptr = NULL;
+    char *URI = NULL;
+
+    // Parse the certificate
+    cert = d2i_X509(NULL, &certificate, len);
+    if (!cert) {
+        LOGERROR("ERROR: unable to parse certificate in memory\r\n");
+        goto error;
+    }
+
+    // Extract the subjectAltName extension
+    int index = X509_get_ext_by_NID( cert, NID_subject_alt_name, -1);
+    if (index < 0 ){
+        LOGERROR("ERROR: the certificate doesn't have the subjectAltName extension\r\n");
+        goto error;
+    }
+    ex = X509_get_ext(cert, index);
+    if (ex == NULL){
+        LOGERROR("ERROR: unable to extract subjectAltName extension\r\n");
+        goto error;
+    }
+
+    // get the extension value
+    ext_bio = BIO_new(BIO_s_mem());
+    if (ext_bio == NULL){
+        LOGERROR("ERROR: unable to allocate memory for extension value BIO\r\n");
+        goto error;
+    }
+    if(!X509V3_EXT_print(ext_bio, ex, 0, 0)){
+        LOGERROR("ERROR: unable to allocate memory for extension value BIO\r\n");
+        goto error;
+    }
+    BIO_flush(ext_bio);
+    BIO_get_mem_ptr(ext_bio, &bptr);
+
+    // Find the URI in the value
+    // example - URI:urn:faceplate.io:Faceplate:opcuadriver, DNS:localhost
+    int URIStart = -1;
+    int URIStop = -1;
+    for (int i=0; i<bptr->length; i++){
+        if ((URIStart == -1) && ( i+4 < bptr->length)){
+            if ((bptr->data[i] == 'U') && (bptr->data[i+1] == 'R') && (bptr->data[i+2] == 'I') && (bptr->data[i+3] == ':') ){
+                URIStart = i+4;
+                i = i+4;
+            }
+        }
+        if (URIStart != -1){ URIStop = i; }
+        if (bptr->data[i] == ',' || bptr->data[i] == '\r' || bptr->data[i] == '\n' ){
+            break;
+        }
+    }
+
+    if (URIStart == -1 || URIStop == -1 || URIStart >= URIStop ){
+        LOGERROR("ERROR: subjectAltName doesn'r contain URI\r\n");
+        goto error;
+    }
+
+    // copy URI
+    URI = malloc( URIStop - URIStart + 1 );
+    if (URI == NULL){
+        LOGERROR("ERROR: unable to allocate memory for URI\r\n");
+        goto error;
+    }
+    memcpy(URI, &bptr->data[URIStart], URIStop - URIStart);
+    URI[URIStop] = '\0';
+
+    LOGDEBUG("DEBUG: subjectAltName %s\r\n", URI);
+
+    BIO_free(ext_bio);
+    X509_free(cert);
+
+    return URI;
+error:
+    if(cert != NULL){
+        X509_free(cert);
+    }
+    if(ext_bio != NULL){
+        BIO_free(ext_bio);
+    }
+    if(URI != NULL){
+        free(URI);
+    }
+    return NULL;
+}
+
 //------------------------THE ENTRY POINT------------------------------------------------
 int main(int argc, char *argv[]) {
 
@@ -798,7 +1022,9 @@ int main(int argc, char *argv[]) {
         LOGERROR("ERROR: unable to allocate the connection object\r\n");
         exit(EXIT_FAILURE);
     }
-    UA_ClientConfig_setDefault(UA_Client_getConfig(opcua_client));
+
+    OpenSSL_add_all_algorithms();
+    ERR_load_BIO_strings();
 
     LOGDEBUG("DEBUG: enter eport_loop\r\n");
     eport_loop( &on_request );

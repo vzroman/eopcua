@@ -41,6 +41,10 @@
     items_tree/1,items_tree/2
 ]).
 
+-export([
+    test/0
+]).
+
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
 
@@ -271,5 +275,23 @@ prefix( Name ) when is_binary(Name)->
     prefix(binary_to_list(Name));
 prefix( Name ) when is_list(Name)->
     lists:append(string:replace(Name,":","_")).
+
+
+
+test()->
+    {ok,Port} = eopcua:start_link(<<"my_connection">>),
+
+    {ok, Cert} = file:read_file("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.der"),
+    {ok, Key} = file:read_file("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.pem"),
+
+    {ok,<<"ok">>} = eopcua:connect(Port, #{ 
+        host=> <<"localhost">>, 
+        port => 4840, endpoint => <<"OPCUA/SimulationServer">>, 
+        login => <<"test_user">>, 
+        password => <<"111111">>, 
+        certificate=> base64:encode(Cert), 
+        private_key=> base64:encode( Key)
+    }).
+
 
 
