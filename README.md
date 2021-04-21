@@ -37,7 +37,9 @@ Secured connection
     {ok,<<"ok">>} = eopcua:connect(Port, #{ 
         host=> <<"localhost">>, 
         port => 4840, 
-        endpoint => <<"OPCUA/SimulationServer">>, 
+        endpoint => <<"OPCUA/SimulationServer">>,
+        certificate => <base64 encoded certificate in der format>,
+        privateKey => <base64 encoded private key in pem format>
         login => <<"test_user">>, 
         password => <<"111111">> 
     }).
