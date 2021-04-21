@@ -290,7 +290,7 @@ test()->
         login => <<"test_user">>, 
         password => <<"111111">>, 
         certificate=> base64:encode(Cert), 
-        privateKey=> base64:encode( Key)
+        private_key=> base64:encode( Key)
     }).
 
 
