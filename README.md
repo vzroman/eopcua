@@ -1,7 +1,10 @@
 eopcua
 =====
 
-An OTP library
+OPC UA driver for Erlang based on open62541 library (https://github.com/open62541/open62541).
+Currently only client is supported.
+
+Examples were written for Prosys OPC UA Simulation Server (https://www.prosysopc.com/products/opc-ua-simulation-server/)
 
 Build
 -----
@@ -13,7 +16,7 @@ Example
     
     {ok,Port} = eopcua:start_link(<<"my_connection">>).
     
-    {ok,EndpointList} = eopcua:browse_endpoints(Port, #{ host=> <<"localhost">>, port => 4841 } ).
+    {ok,EndpointList} = eopcua:browse_endpoints(Port, #{ host=> <<"localhost">>, port => 4840 } ).
     
     {ok,<<"ok">>} = eopcua:connect(Port, #{ host=> <<"localhost">>, port => 4841, endpoint => <<"OPCUA/SimulationServer">> }).
     
