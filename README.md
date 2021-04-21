@@ -32,7 +32,7 @@ Example
 Secured connection
 -----
     // Generate certificate
-    openssl req -new -x509  -config example.cert.config -newkey rsa:2048 -keyout eopcua.key -nodes -outform der -out eopcua.der
+    openssl req -new -x509  -config cert/example.cert.config -newkey rsa:2048 -keyout cert/eopcua.pem -nodes -outform der -out cert/eopcua.der
     
     // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
     
