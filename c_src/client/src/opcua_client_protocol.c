@@ -217,6 +217,8 @@ int parse_connect_request( cJSON *request ){
     cJSON *endpoint = NULL;
     cJSON *port = NULL;
     cJSON *login = NULL;
+    cJSON *certificate = NULL;
+    cJSON *key = NULL;
     cJSON *password = NULL;
     char *connectionString = NULL;
 
@@ -245,11 +247,22 @@ int parse_connect_request( cJSON *request ){
         endpoint = NULL;
     }
 
-    LOGDEBUG("DEBUG: parsing login/passowrd\r\n");
-
+    // Parse login (optional)
+    certificate = cJSON_GetObjectItemCaseSensitive(request, "certificate");
+    if (cJSON_IsString(certificate) && (certificate->valuestring != NULL)){
+        // It is a secure connection, the key must be provided
+        key = cJSON_GetObjectItemCaseSensitive(request, "key");
+        if (!cJSON_IsString(key) || (key->valuestring == NULL)){
+            LOGERROR("ERROR: key is not defined\r\n");
+            goto error; 
+        }
+    }else{
+        certificate = NULL;
+    }
     // Parse login (optional)
     login = cJSON_GetObjectItemCaseSensitive(request, "login");
     if (cJSON_IsString(login) && (login->valuestring != NULL)){
+
         // If the login is provided then the password is required
         password = cJSON_GetObjectItemCaseSensitive(request, "password");
         if (!cJSON_IsString(password) || (password->valuestring == NULL)){
