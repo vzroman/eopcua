@@ -147,7 +147,7 @@ cJSON* opcua_client_connect(cJSON* request){
     // Connection params
     cJSON *url = cJSON_GetObjectItemCaseSensitive(request, "url");
     cJSON *certificate = cJSON_GetObjectItemCaseSensitive(request, "certificate");
-    cJSON *privateKey = cJSON_GetObjectItemCaseSensitive(request, "privateKey");
+    cJSON *privateKey = cJSON_GetObjectItemCaseSensitive(request, "private_key");
     cJSON *login = cJSON_GetObjectItemCaseSensitive(request, "login");
     cJSON *password = cJSON_GetObjectItemCaseSensitive(request, "password");
     UA_ByteString *cert = NULL;

@@ -250,7 +250,7 @@ int parse_connect_request( cJSON *request ){
     certificate = cJSON_GetObjectItemCaseSensitive(request, "certificate");
     if (cJSON_IsString(certificate) && (certificate->valuestring != NULL)){
         // It is a secure connection, the key must be provided
-        privateKey = cJSON_GetObjectItemCaseSensitive(request, "privateKey");
+        privateKey = cJSON_GetObjectItemCaseSensitive(request, "private_key");
         if (!cJSON_IsString(privateKey) || (privateKey->valuestring == NULL)){
             LOGERROR("ERROR: key is not defined\r\n");
             goto error; 
