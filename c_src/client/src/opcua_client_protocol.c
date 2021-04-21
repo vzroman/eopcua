@@ -34,16 +34,16 @@ OPCUA_CLIENT_CMD string2cmd(char *cmd);
 char* cmd2string(OPCUA_CLIENT_CMD cmd);
 
 
-OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
+int parse_request( const char *message, OPCUA_CLIENT_REQUEST* request ){
 
+    cJSON *JSON = NULL;
     const cJSON *cmd = NULL;
     const cJSON *tid = NULL;
-    OPCUA_CLIENT_REQUEST *request = malloc( sizeof(OPCUA_CLIENT_REQUEST) );
     request->body = NULL;
 
     // Parse the request to JSON structure
     LOGDEBUG("DEBUG: parse JSON\r\n");
-    cJSON *JSON = cJSON_Parse( message );
+    JSON = cJSON_Parse( message );
     if (JSON == NULL){
         const char *error_ptr = cJSON_GetErrorPtr();
         if (error_ptr != NULL) {
@@ -80,7 +80,8 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
     
     // Parse body
     LOGDEBUG("DEBUG: parse body\r\n");
-    request->body = cJSON_GetObjectItemCaseSensitive(JSON, "body");
+    request->body = cJSON_DetachItemFromObject(JSON, "body");
+
     if (request->cmd == OPCUA_CLIENT_CONNECT){
         if (parse_connect_request( request->body ) != 0){ goto error; }
     } else if( request->cmd == OPCUA_CLIENT_READ ){
@@ -104,29 +105,25 @@ OPCUA_CLIENT_REQUEST* parse_request( const char *message ){
         goto error;
     }
 
-    return request;
+    cJSON_Delete( JSON );
+
+    return 0;
 
 error:
-    purge_request( request );
+
     cJSON_Delete( JSON );
-    return NULL;
+    return -1;
 }
 
 // Clean the memory used for the request structure
 void purge_request( OPCUA_CLIENT_REQUEST* request ){
-    if( request != NULL ){
-        cJSON_Delete( request->body );
-        free( request );
-    }
+    cJSON_Delete( request->body );
 }
 
 // Build the response
 char* create_response( OPCUA_CLIENT_REQUEST *request, cJSON *responseBody ){
     cJSON *response = cJSON_CreateObject();
     char *responseString = NULL;
-    if( request == NULL ){
-        goto error;
-    }
 
     // Inherit command type from the request
     char *cmd = cmd2string( request->cmd );
@@ -209,6 +206,8 @@ char* cmd2string(OPCUA_CLIENT_CMD cmd){
 //         "port": 4841,
 //         ----optional---------
 //         "endpoint": "OPCUA/SimulationServer",
+//         "certificate": "<base64 encoded der>",
+//         "privateKey": "<base64 encoded pem>",
 //         "login":"user1",
 //         "password":"secret"
 //     }
@@ -218,7 +217,7 @@ int parse_connect_request( cJSON *request ){
     cJSON *port = NULL;
     cJSON *login = NULL;
     cJSON *certificate = NULL;
-    cJSON *key = NULL;
+    cJSON *privateKey = NULL;
     cJSON *password = NULL;
     char *connectionString = NULL;
 
@@ -251,8 +250,8 @@ int parse_connect_request( cJSON *request ){
     certificate = cJSON_GetObjectItemCaseSensitive(request, "certificate");
     if (cJSON_IsString(certificate) && (certificate->valuestring != NULL)){
         // It is a secure connection, the key must be provided
-        key = cJSON_GetObjectItemCaseSensitive(request, "key");
-        if (!cJSON_IsString(key) || (key->valuestring == NULL)){
+        privateKey = cJSON_GetObjectItemCaseSensitive(request, "privateKey");
+        if (!cJSON_IsString(privateKey) || (privateKey->valuestring == NULL)){
             LOGERROR("ERROR: key is not defined\r\n");
             goto error; 
         }

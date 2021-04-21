@@ -38,7 +38,7 @@ typedef struct opcua_client_request{
 } OPCUA_CLIENT_REQUEST;
 
 // Parse a request
-OPCUA_CLIENT_REQUEST* parse_request( const char *message );
+int parse_request( const char *message, OPCUA_CLIENT_REQUEST* request );
 void purge_request( OPCUA_CLIENT_REQUEST *request );
 
 // Build response
