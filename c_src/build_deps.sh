@@ -27,7 +27,7 @@ case "$1" in
     build)
         # open62541
         if [ ! -d open62541 ]; then
-            git clone -b $open62541_VSN https://github.com/open62541/open62541.git
+            git clone --depth 1 -b $open62541_VSN https://github.com/open62541/open62541.git
         fi
         cd open62541
         mkdir -p build
@@ -38,7 +38,7 @@ case "$1" in
         # cJSON
         cd $BASEDIR
         if [ ! -d cJSON ]; then
-            git clone -b v1.7.14 https://github.com/DaveGamble/cJSON.git
+            git clone --depth 1 -b v1.7.14 https://github.com/DaveGamble/cJSON.git
         fi
         cd cJSON
         mkdir -p build
@@ -49,7 +49,7 @@ case "$1" in
         # uthash
         cd $BASEDIR
         if [ ! -d uthash ]; then
-            git clone -b v2.3.0 https://github.com/troydhanson/uthash.git
+            git clone --depth 1 -b v2.3.0 https://github.com/troydhanson/uthash.git
         fi
         
         ;;
