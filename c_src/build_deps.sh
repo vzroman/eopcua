@@ -1,7 +1,7 @@
 #!/bin/sh
 # based on build_deps.sh from basho/eleveldb
 
-open62541_VSN="v1.2"
+open62541_VSN="1.2"
 
 set -e
 
