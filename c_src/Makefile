@@ -11,10 +11,12 @@ ERL_INTERFACE_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(
 ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~ts\", [code:lib_dir(erl_interface, lib)]).")
 
 OPEN62541_INCLUDE_DIR ?= $(CURDIR)/open62541/build/_install/include
-OPEN62541_LIB_DIR ?= $(CURDIR)/open62541/build/_install/lib64
+OPEN62541_LIB64_DIR ?= $(CURDIR)/open62541/build/_install/lib64
+OPEN62541_LIB_DIR ?= $(CURDIR)/open62541/build/_install/lib
 
 CJSON_INCLUDE_DIR ?= $(CURDIR)/cJSON/build/_install/include
-CJSON_LIB_DIR ?= $(CURDIR)/cJSON/build/_install/lib64
+CJSON_LIB64_DIR ?= $(CURDIR)/cJSON/build/_install/lib64
+CJSON_LIB_DIR ?= $(CURDIR)/cJSON/build/_install/lib
 
 UTHASH_INCLUDE_DIR ?= $(CURDIR)/uthash/include
 
@@ -45,7 +47,7 @@ endif
 CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(UTHASH_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR) -I $(CLIENT_INCLUDE_DIR)
 CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(UTHASH_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR) -I $(CLIENT_INCLUDE_DIR)
 
-LDLIBS += -lssl -lcrypto -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei -L $(OPEN62541_LIB_DIR) -lopen62541 -L $(CJSON_LIB_DIR) -lcjson -lcjson_utils
+LDLIBS += -lssl -lcrypto -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei -L $(OPEN62541_LIB_DIR) -L $(OPEN62541_LIB64_DIR) -lopen62541 -L $(CJSON_LIB_DIR) -L $(CJSON_LIB64_DIR) -lcjson -lcjson_utils
 
 # Verbosity.
 
