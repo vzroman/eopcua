@@ -1,7 +1,10 @@
 eopcua
 =====
 
-An OTP library
+OPC UA driver for Erlang based on open62541 library (https://github.com/open62541/open62541).
+Currently only client is supported.
+
+Examples were written for Prosys OPC UA Simulation Server (https://www.prosysopc.com/products/opc-ua-simulation-server/)
 
 Build
 -----
@@ -13,9 +16,9 @@ Example
     
     {ok,Port} = eopcua:start_link(<<"my_connection">>).
     
-    {ok,EndpointList} = eopcua:browse_endpoints(Port, #{ host=> <<"localhost">>, port => 4841 } ).
+    {ok,EndpointList} = eopcua:browse_endpoints(Port, #{ host=> <<"localhost">>, port => 4840 } ).
     
-    {ok,<<"ok">>} = eopcua:connect(Port, #{ host=> <<"localhost">>, port => 4841, endpoint => <<"OPCUA/SimulationServer">> }).
+    {ok,<<"ok">>} = eopcua:connect(Port, #{ host=> <<"localhost">>, port => 4840, endpoint => <<"OPCUA/SimulationServer">> }).
     
     {ok,SubItems} = eopcua:browse_folder(Port, [ <<"StaticData">>,<<"AnalogItems">> ] ).
     
@@ -32,7 +35,7 @@ Example
 Secured connection
 -----
     // Generate certificate
-    openssl req -new -x509  -config example.cert.config -newkey rsa:2048 -keyout eopcua.key -nodes -outform der -out eopcua.der
+    openssl req -new -x509  -config cert/example.cert.config -newkey rsa:2048 -keyout cert/eopcua.pem -nodes -outform der -out cert/eopcua.der
     
     // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
     
