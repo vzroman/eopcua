@@ -18,6 +18,8 @@ cd $BASEDIR
 which gmake 1>/dev/null 2>/dev/null && MAKE=gmake
 MAKE=${MAKE:-make}
 
+# This is a workaround of compilation error of cJSON: 
+#   generic selections are a C11-specific feature
 TARGET_OS=`uname -s`
 if [ "$TARGET_OS" = "Darwin" ] || [ "$TARGET_OS" = "FreeBSD" ]; then
     export CFLAGS="$CFLAGS -Wno-c11-extensions"
