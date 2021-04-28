@@ -18,6 +18,11 @@ cd $BASEDIR
 which gmake 1>/dev/null 2>/dev/null && MAKE=gmake
 MAKE=${MAKE:-make}
 
+TARGET_OS=`uname -s`
+if [ "$TARGET_OS" = "Darwin" ] || [ "$TARGET_OS" = "FreeBSD" ]; then
+    export CFLAGS="$CFLAGS -Wno-c11-extensions"
+fi
+
 case "$1" in
     clean)
         rm -rf open62541
