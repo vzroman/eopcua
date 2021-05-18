@@ -410,6 +410,7 @@ cJSON* opcua_client_subscribe(cJSON* request){
         return opcua_client_read( request );
     }else{
         free( path );
+        path = NULL;
         // The binding is already in the active subscriptions
         LOGDEBUG("DEBUG: lookup the value in the active subscriptions\r\n");
 
