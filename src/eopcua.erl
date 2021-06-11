@@ -223,7 +223,7 @@ create_certificate( Name )->
         "openssl req -new -x509  -config "++
         Priv++"/cert/example.cert.config -newkey rsa:2048 -keyout "++
         Key++" -nodes -outform der "++
-        "-subj '/CN="++unicode:characters_to_list(Name)++"'"++
+        "-subj '/CN="++unicode:characters_to_list(Name)++"' "++
         "-out "++Cert,
     
     Out = os:cmd( Cmd ),
