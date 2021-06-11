@@ -39,7 +39,7 @@
     browse_endpoints/2,browse_endpoints/3,
     browse_folder/2,browse_folder/3,
     items_tree/1,items_tree/2,
-    create_certificate/0
+    create_certificate/1
 ]).
 
 -export([
@@ -214,7 +214,7 @@ items_tree(PID,Timeout,Path)->
             throw(Error)
     end.   
 
-create_certificate()->
+create_certificate( Name )->
     Priv = code:priv_dir(eopcua),
     Key = Priv++"/eopcua.pem",
     Cert = Priv++"/eopcua.der",
@@ -222,8 +222,9 @@ create_certificate()->
     Cmd = 
         "openssl req -new -x509  -config "++
         Priv++"/cert/example.cert.config -newkey rsa:2048 -keyout "++
-        Key++" -nodes -outform der -out "++
-        Cert,
+        Key++" -nodes -outform der "++
+        "-subj '/CN="++unicode:characters_to_list(Name)++"'"++
+        "-out "++Cert,
     
     Out = os:cmd( Cmd ),
 
