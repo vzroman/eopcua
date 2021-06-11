@@ -26,9 +26,9 @@ Example
     
     {ok,[State,Sinusoid]} = eopcua:read(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
     
-    {ok,<<"ok">>} = eopcua:write(Port, [ {<<"StaticData/AnalogItems/Int32AnalogItem">>, 34}, {<<"StaticData/AnalogItems/FloatAnalogItem">>, 34.34}).
+    {ok,[ok, {error,Error}]} = eopcua:write(Port, [ {<<"StaticData/AnalogItems/Int32AnalogItem">>, 34}, {<<"StaticData/AnalogItems/FloatAnalogItem">>, 34.34}).
     
-    {ok,[State,Sinusoid]} = eopcua:subscribe(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
+    {ok,[State,{error,Error}]} = eopcua:subscribe(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
     
     {ok,<<"ok">>} = eopcua:update_subscriptions(Port).
     
