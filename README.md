@@ -24,7 +24,7 @@ Example
     
     {ok,Tree} = eopcua:items_tree(Port ).
     
-    {ok,Value} = eopcua:read(Port, [ <<"Server">>,<<"ServerStatus">>,<<"State">> ]).
+    {ok,[State,Sinusoid]} = eopcua:read(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
     
     {ok,<<"ok">>} = eopcua:write(Port, [ <<"StaticData">>,<<"AnalogItems">>,<<"Int32AnalogItem">> ], 34).
     
