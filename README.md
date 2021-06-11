@@ -39,7 +39,7 @@ Secured connection
     
     OR
     
-    {ok, #{ key := Key, certificate := Cert } } = eopcua:create_certificate().
+    {ok, #{ key := Key, certificate := Cert } } = eopcua:create_certificate(<<"my.connection">>).
     
     // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
     
