@@ -312,6 +312,7 @@ error:
 
 int parse_read_request( cJSON *request ){
     cJSON *item = NULL;
+    cJSON *name = NULL;
 
     if ( !cJSON_IsArray(request) ) {
         LOGERROR("ERROR: invalid read parameters\r\n");
@@ -320,9 +321,15 @@ int parse_read_request( cJSON *request ){
 
     // Copy request items
     cJSON_ArrayForEach(item, request) {
-        if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+        if (!cJSON_IsArray(item)){
             LOGERROR("ERROR: invalid item to read\r\n");
             goto error;
+        }
+        cJSON_ArrayForEach(name, item) {
+            if (!cJSON_IsString(name) || (name->valuestring == NULL)) {
+                LOGERROR("ERROR: invalid item to read\r\n");
+                goto error;
+            }
         }
     }
     return 0;
@@ -335,50 +342,52 @@ int parse_write_request( cJSON *request ){
     cJSON *tag = NULL;
     cJSON *value = NULL;
     cJSON *item = NULL;
+    cJSON *name = NULL;
 
-    if ( !cJSON_IsObject(request) ) {
+    if ( !cJSON_IsArray(request) ) {
         LOGERROR("ERROR: invalid write parameters\r\n");
         goto error;
     }
 
-    // ------------Tag---------------------------------
-    tag = cJSON_GetObjectItemCaseSensitive(request, "tag");
-    if (!cJSON_IsArray(tag)) {
-        LOGERROR("ERROR: invalid tag\r\n");
-        goto error;
-    }
-    cJSON_ArrayForEach(item, tag) {
-        if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+    cJSON_ArrayForEach(item, request) {
+        if (!cJSON_IsArray(item)) {
             LOGERROR("ERROR: invalid item to write\r\n");
             goto error;
         }
-    }
 
-    // ---------value---------------------------------------
-    value = cJSON_GetObjectItemCaseSensitive(request, "value");
-    LOGDEBUG("DEBUG: add value to request\r\n");
-    if (cJSON_IsString(value) && (value->valuestring != NULL)) {
-        // OK
-    }else if(cJSON_IsNumber(value)){
-        // OK
-    }else if( cJSON_IsBool(value) ){
-        if (cJSON_IsFalse(value)){
-            value = cJSON_CreateNumber(0);
+        tag = cJSON_GetArrayItem(item, 0);
+        cJSON_ArrayForEach(name, tag) {
+            if (!cJSON_IsString(name) || (name->valuestring == NULL)) {
+                LOGERROR("ERROR: invalid item to write\r\n");
+                goto error;
+            }
+        }
+
+        value = cJSON_GetArrayItem(item, 1);
+
+        if (cJSON_IsString(value) && (value->valuestring != NULL)) {
+            // OK
+        }else if(cJSON_IsNumber(value)){
+            // OK
+        }else if( cJSON_IsBool(value) ){
+            if (cJSON_IsFalse(value)){
+                value = cJSON_CreateNumber(0);
+            }else{
+                value = cJSON_CreateNumber(1);
+            }
+            if (value == NULL){
+                LOGERROR("ERROR: unable alocate cJSON object for value\r\n");
+                goto error;
+            }
+            // cJSON purges the previous ite itself
+            if ( !cJSON_ReplaceItemInArray(item, 1, value) ){
+                LOGERROR("ERROR: unable to coerce the value\r\n");
+                goto error;
+            }
         }else{
-            value = cJSON_CreateNumber(1);
-        }
-        if (value == NULL){
-            LOGERROR("ERROR: unable alocate cJSON object for value\r\n");
+            LOGERROR("ERROR: invalid value to write\r\n");
             goto error;
         }
-        // cJSON purges the previous ite itself
-        if ( !cJSON_ReplaceItemInObjectCaseSensitive(request,"value",value) ){
-            LOGERROR("ERROR: unable to coerce the value\r\n");
-            goto error;
-        }
-    }else{
-        LOGERROR("ERROR: invalid value to write\r\n");
-        goto error;
     }
 
     LOGDEBUG("DEBUG: return parsed write request\r\n");
@@ -390,16 +399,24 @@ error:
 
 int parse_subscribe_request( cJSON *request ){
     cJSON *item = NULL;
+    cJSON *name = NULL;
 
     if ( !cJSON_IsArray(request) ) {
-        LOGERROR("ERROR: invalid subscribe parameter\r\n");
+        LOGERROR("ERROR: invalid subscribe parameters\r\n");
         goto error;
     }
 
+    // Check request items
     cJSON_ArrayForEach(item, request) {
-        if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+        if (!cJSON_IsArray(item)){
             LOGERROR("ERROR: invalid item to subscribe\r\n");
             goto error;
+        }
+        cJSON_ArrayForEach(name, item) {
+            if (!cJSON_IsString(name) || (name->valuestring == NULL)) {
+                LOGERROR("ERROR: invalid item to subscribe\r\n");
+                goto error;
+            }
         }
     }
     return 0;

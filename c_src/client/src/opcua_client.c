@@ -40,8 +40,11 @@ cJSON* on_error(char* text);
 cJSON* on_ok(cJSON* response);
 cJSON* opcua_client_connect(cJSON* request);
 cJSON* opcua_client_read(cJSON* request);
+cJSON* opcua_client_read_item(cJSON* request);
 cJSON* opcua_client_write(cJSON* request);
+cJSON* opcua_client_write_item(cJSON* request);
 cJSON* opcua_client_subscribe(cJSON* request);
+cJSON* opcua_client_subscribe_item(cJSON* request);
 cJSON* opcua_client_update_subscriptions(cJSON* request);
 cJSON* opcua_client_browse_endpoints(cJSON* request);
 cJSON* opcua_client_browse_folder(cJSON* request);
@@ -253,37 +256,26 @@ error:
     return on_error( errorString );
 }
 
+//---------------------------------------------------------------
+//  READ
+//---------------------------------------------------------------
 cJSON* opcua_client_read(cJSON* request){
-    char *errorString = NULL;
-    UA_Variant *value = UA_Variant_new();
-    cJSON *response = NULL;
     LOGDEBUG("DEBUG: reading\r\n");
+    char *errorString = NULL;
+    cJSON *response = cJSON_CreateArray();
+    cJSON *item = NULL;
+    cJSON *value = NULL;
 
-    UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-    int ret = path2nodeId( request, &nodeId );
-    if (ret != 0){
-        errorString = "invalid node path";
-        goto error;
+    cJSON_ArrayForEach(item, request) {
+        value = opcua_client_read_item( item );
+        if ( !cJSON_AddItemToArray(response, value) ){
+            LOGERROR("ERROR: unable add a value for item\r\n");
+            goto error;
+        }
     }
-
-    /* Read the value */
-    if (UA_Client_readValueAttribute(opcua_client, nodeId, value) != UA_STATUSCODE_GOOD ) {
-        errorString = "unable to read value";
-        goto error;
-    }
-
-    response = parse_value( value );    
-    if (response == NULL){
-        errorString = "invalid value";
-        goto error;
-    }
-
-    UA_Variant_delete(value);
 
     return on_ok( response );
-
 error:
-    UA_Variant_delete(value);
     cJSON_Delete( response );
     if (errorString == NULL){
         errorString = "programming error in opcua_client_read";
@@ -291,34 +283,99 @@ error:
     return on_error( errorString );
 }
 
+cJSON* opcua_client_read_item(cJSON* request){
+    char *errorString = NULL;
+    UA_Variant *value = UA_Variant_new();
+    cJSON *response = NULL;
+    LOGDEBUG("DEBUG: reading item\r\n");
+
+    UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    int ret = path2nodeId( request, &nodeId );
+    if (ret != 0){
+        errorString = "error: invalid node path";
+        goto error;
+    }
+
+    /* Read the value */
+    if (UA_Client_readValueAttribute(opcua_client, nodeId, value) != UA_STATUSCODE_GOOD ) {
+        errorString = "error: unable to read value";
+        goto error;
+    }
+
+    response = parse_value( value );    
+    if (response == NULL){
+        errorString = "error: invalid value";
+        goto error;
+    }
+
+    UA_Variant_delete(value);
+
+    return response;
+
+error:
+    UA_Variant_delete(value);
+    cJSON_Delete( response );
+    if (errorString == NULL){
+        errorString = "error: programming error in opcua_client_read";
+    }
+    return cJSON_CreateString(errorString);
+}
+
+//---------------------------------------------------------------
+//  WRITE
+//---------------------------------------------------------------
 cJSON* opcua_client_write(cJSON* request){
+    LOGDEBUG("DEBUG: writing\r\n");
+    char *errorString = NULL;
+    cJSON *response = cJSON_CreateArray();
+    cJSON *item = NULL;
+    cJSON *result = NULL;
+
+    cJSON_ArrayForEach(item, request) {
+        result = opcua_client_write_item( item );
+        if ( !cJSON_AddItemToArray(response, result) ){
+            LOGERROR("ERROR: unable add a result for item\r\n");
+            goto error;
+        }
+    }
+
+    return on_ok( response );
+error:
+    cJSON_Delete( response );
+    if (errorString == NULL){
+        errorString = "programming error in opcua_client_read";
+    }
+    return on_error( errorString );
+}
+
+cJSON* opcua_client_write_item(cJSON* request){
     char *errorString = NULL;
     cJSON *response = NULL;
     UA_Variant *ua_value = UA_Variant_new();
-    LOGDEBUG("DEBUG: writing\r\n");
+    LOGDEBUG("DEBUG: writing item\r\n");
 
-    cJSON *tag = cJSON_GetObjectItemCaseSensitive(request, "tag");
-    cJSON *value = cJSON_GetObjectItemCaseSensitive(request, "value");
+    cJSON *tag = cJSON_GetArrayItem(request, 0);
+    cJSON *value = cJSON_GetArrayItem(request, 1);
 
     // Get the type of the tag
     UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
     int ret = path2nodeId( tag, &nodeId );
     if (ret != 0){
-        errorString = "invalid node path";
+        errorString = "error: invalid node path";
         goto error;
     }
     if (UA_Client_readValueAttribute(opcua_client, nodeId, ua_value) != UA_STATUSCODE_GOOD ) {
-        errorString = "unable to define tag type";
+        errorString = "error: unable to define tag type";
         goto error;
     }
     if ( export_value(ua_value, value) != 0 ){
-        errorString = "invalid value";
+        errorString = "error: invalid value";
         goto error;
     }
 
     // Write the value
     if ( UA_Client_writeValueAttribute(opcua_client, nodeId, ua_value) != UA_STATUSCODE_GOOD ){
-        errorString = "unable to write value";
+        errorString = "error: unable to write value";
         goto error;
     }
 
@@ -329,27 +386,53 @@ cJSON* opcua_client_write(cJSON* request){
 
     UA_Variant_delete(ua_value);
     
-    return on_ok( response );
+    return response;
 
 error:
     UA_Variant_delete( ua_value );
+    if (errorString == NULL){
+        errorString = "error: programming error in opcua_client_write";
+    }
+    return cJSON_CreateString(errorString);
+}
+
+//---------------------------------------------------------------
+//  SUBSCRIBE
+//---------------------------------------------------------------
+cJSON* opcua_client_subscribe(cJSON* request){
+    LOGDEBUG("DEBUG: subscribing\r\n");
+    char *errorString = NULL;
+    cJSON *response = cJSON_CreateArray();
+    cJSON *item = NULL;
+    cJSON *result = NULL;
+
+    cJSON_ArrayForEach(item, request) {
+        result = opcua_client_subscribe_item( item );
+        if ( !cJSON_AddItemToArray(response, result) ){
+            LOGERROR("ERROR: unable add a result for item\r\n");
+            goto error;
+        }
+    }
+
+    return on_ok( response );
+error:
     cJSON_Delete( response );
     if (errorString == NULL){
-        errorString = "programming error in opcua_client_write";
+        errorString = "programming error in opcua_client_subscribe";
     }
     return on_error( errorString );
 }
 
-cJSON* opcua_client_subscribe(cJSON* request){
+cJSON* opcua_client_subscribe_item(cJSON* request){
     char *errorString = NULL;
     cJSON *response = NULL;
     char *path = NULL;
-    LOGDEBUG("DEBUG: subscribing\r\n");
+    LOGDEBUG("DEBUG: subscribing to an item\r\n");
 
     // Get the key to the binding
     path = path2string( request );
     if (path == NULL){
-        errorString = "unable to convert the node path to string";
+        errorString = "error: unable to convert the node path to string";
         goto error;
     }
 
@@ -367,7 +450,7 @@ cJSON* opcua_client_subscribe(cJSON* request){
         UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
         int ret = path2nodeId( request, &nodeId );
         if (ret != 0){
-            errorString = "invalid node path";
+            errorString = "error: invalid node path";
             goto error;
         }
 
@@ -380,14 +463,14 @@ cJSON* opcua_client_subscribe(cJSON* request){
         LOGDEBUG("DEBUG: monResponse.monitoredItemId %d\r\n", monResponse.monitoredItemId);
 
         if(monResponse.statusCode != UA_STATUSCODE_GOOD){
-            errorString = "uanble to add a monitored item";
+            errorString = "error: uanble to add a monitored item";
             goto error;
         }
 
         // Add the binding to the collection
         b = (opcua_client_binding *)malloc(sizeof *b);
         if (b == NULL){
-            errorString = "uanble to allocate the memory for a new binding index";
+            errorString = "error: uanble to allocate the memory for a new binding index";
             goto error;
         }
         b->path = path;
@@ -395,7 +478,7 @@ cJSON* opcua_client_subscribe(cJSON* request){
 
         s = (opcua_client_subscription *)malloc(sizeof *s);
         if (s == NULL){
-            errorString = "unable to allocate the memory for new binding";
+            errorString = "error: unable to allocate the memory for new binding";
             goto error;
         }
         s->id = monResponse.monitoredItemId;
@@ -407,7 +490,7 @@ cJSON* opcua_client_subscribe(cJSON* request){
         // The subscription is already created, we should not clear the path from this moment
         path = NULL;
 
-        return opcua_client_read( request );
+        return opcua_client_read_item( request );
     }else{
         free( path );
         path = NULL;
@@ -417,18 +500,18 @@ cJSON* opcua_client_subscribe(cJSON* request){
         // Lookup the value
         HASH_FIND_INT(opcua_client_subscriptions, &b->id, s);
         if (s == NULL){
-            errorString = "invalid subscription index";
+            errorString = "error: invalid subscription index";
             goto error;
         }
 
         response = parse_value( s->value );
         if (response == NULL){
-            errorString = "invalid value";
+            errorString = "error: invalid value";
             goto error;
         }
     }
 
-    return on_ok( response );
+    return response;
 
 error:
     if (path != NULL){
@@ -438,7 +521,7 @@ error:
     if (errorString == NULL){
         errorString = "programming error in opcua_client_read";
     }
-    return on_error( errorString );
+    return cJSON_CreateString(errorString);
 }
 
 cJSON* opcua_client_update_subscriptions(cJSON* request){

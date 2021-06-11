@@ -33,7 +33,7 @@
 -export([
     connect/2,connect/3,
     read/2,read/3,
-    write/3,write/4,
+    write/2,write/3,
     subscribe/2,subscribe/3,
     update_subscriptions/1,update_subscriptions/2,
     browse_endpoints/2,browse_endpoints/3,
@@ -90,20 +90,86 @@ connect(PID, Params)->
 connect(PID, Params, Timeout)->
     transaction( PID, <<"connect">>, Params, Timeout ).   
 
-read(PID, Path)->
-    read(PID,Path,?RESPONSE_TIMEOUT).
-read(PID, Path, Timeout)->
-    transaction( PID, <<"read">>, Path, Timeout ).
+read(PID, Items)->
+    read(PID,Items,?RESPONSE_TIMEOUT).
+read(PID, Items, Timeout) when is_map( Items )->
+    Items1 = maps:to_list( Items ),
+    case read( PID, Items1, Timeout ) of
+        {ok, Results}->
+            Results1 = maps:from_list(lists:zip( Items1, Results )),
+            {ok, Results1};
+        Error->
+            Error
+    end;    
+read(PID, Items, Timeout)->
+    Items1 = 
+        [ binary:split(I, <<"/">>, [global] ) || I <- Items],
+    case transaction( PID, <<"read">>, Items1, Timeout ) of
+        {ok, Values}->
+            Values1 = 
+                [ case V of
+                    <<"error: ", ItemError/binary>>->
+                        {error, ItemError};
+                    _-> V
+                  end || V <- Values ],
+            { ok, Values1 };   
+        Error->
+            Error
+    end.
 
-write(PID, Path, Value)->
-    write(PID,Path, Value,?RESPONSE_TIMEOUT).
-write(PID, Path, Value, Timeout)->
-    transaction( PID, <<"write">>, #{ <<"tag">> => Path, <<"value">> => Value}, Timeout ).
+write(PID, Items)->
+    write(PID,Items,?RESPONSE_TIMEOUT).
+write(PID, Items, Timeout) when is_map( Items )->
+    Items1 = maps:to_list( Items ),
+    case write(PID, Items1, Timeout) of
+        {ok, Results}->
+            Results1 = maps:from_list(lists:zip( Items1, Results )),
+            { ok, Results1 };
+        Error->
+            Error
+    end;
+write(PID, Items, Timeout)->
+    Items1 = 
+        [ [ binary:split(I, <<"/">>, [global] ), V] || {I, V} <- Items],
+    case transaction( PID, <<"write">>, Items1, Timeout ) of
+        {ok, Results}->
+            Results1 = 
+                [ case V of
+                    <<"error: ", ItemError/binary>>->
+                        {error, ItemError};
+                    _-> ok
+                  end || V <- Results ],
+            { ok, Results1 };   
+        Error->
+            Error
+    end.    
 
-subscribe(PID, Path)->
-    subscribe(PID,Path,?RESPONSE_TIMEOUT).
-subscribe(PID, Path, Timeout)->
-    transaction( PID, <<"subscribe">>, Path, Timeout ).
+subscribe(PID, Items)->
+    subscribe(PID,Items,?RESPONSE_TIMEOUT).
+subscribe(PID, Items, Timeout) when is_map(Items)->
+    Items1 = maps:to_list( Items ),
+    case subscribe( PID, Items1, Timeout ) of
+        {ok, Results}->
+            Results1 = maps:from_list(lists:zip( Items1, Results )),
+            {ok, Results1};
+        Error->
+            Error
+    end;
+subscribe(PID, Items, Timeout)->
+    Items1 = 
+        [ binary:split(I, <<"/">>, [global] ) || I <- Items],
+    case transaction( PID, <<"subscribe">>, Items1, Timeout ) of
+        {ok, Values}->
+            Values1 = 
+                [ case V of
+                    <<"error: ", ItemError/binary>>->
+                        {error, ItemError};
+                    _-> V
+                  end || V <- Values ],
+            { ok, Values1 };   
+        Error->
+            Error
+    end.    
 
 update_subscriptions(PID)->
     update_subscriptions(PID,?RESPONSE_TIMEOUT).
