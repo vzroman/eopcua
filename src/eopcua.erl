@@ -38,7 +38,8 @@
     update_subscriptions/1,update_subscriptions/2,
     browse_endpoints/2,browse_endpoints/3,
     browse_folder/2,browse_folder/3,
-    items_tree/1,items_tree/2
+    items_tree/1,items_tree/2,
+    create_certificate/0
 ]).
 
 -export([
@@ -133,6 +134,7 @@ write(PID, Items, Timeout)->
         [ [ binary:split(I, <<"/">>, [global] ), V] || {I, V} <- Items],
     case transaction( PID, <<"write">>, Items1, Timeout ) of
         {ok, Results}->
+            update_subscriptions(PID),
             Results1 = 
                 [ case V of
                     <<"error: ", ItemError/binary>>->
@@ -210,7 +212,33 @@ items_tree(PID,Timeout,Path)->
             end,#{},Items);
         {error,Error}->
             throw(Error)
-    end.    
+    end.   
+
+create_certificate()->
+    Priv = code:priv_dir(eopcua),
+    Key = Priv++"/eopcua.pem",
+    Cert = Priv++"/eopcua.der",
+
+    Cmd = 
+        "openssl req -new -x509  -config "++
+        Priv++"/cert/example.cert.config -newkey rsa:2048 -keyout "++
+        Key++" -nodes -outform der -out "++
+        Cert,
+    
+    Out = os:cmd( Cmd ),
+
+    Result =
+        case { file:read_file(Key), file:read_file(Cert) } of
+            { {ok, KeyData}, {ok, CertData} }->
+                {ok, #{ key => KeyData, certificate => CertData } };
+            _->
+                {error, { Cmd, Out }}
+        end,
+    file:delete(Key),
+    file:delete(Cert),
+
+    Result.
+
 
 transaction( PID, Command, Body, Timeout )->
     TID = rand:uniform(16#FFFF),
