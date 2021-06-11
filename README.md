@@ -35,7 +35,11 @@ Example
 Secured connection
 -----
     // Generate certificate
-    openssl req -new -x509  -config cert/example.cert.config -newkey rsa:2048 -keyout cert/eopcua.pem -nodes -outform der -out cert/eopcua.der
+    openssl req -new -x509  -config priv/cert/example.cert.config -newkey rsa:2048 -keyout priv/eopcua.pem -nodes -outform der -out priv/eopcua.der
+    
+    OR
+    
+    {ok, #{ key := Key, certificate := Cert } } = eopcua:create_certificate().
     
     // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
     
