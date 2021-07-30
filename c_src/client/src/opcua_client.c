@@ -57,6 +57,7 @@ int export_value(UA_Variant *ua_value, cJSON *value);
 int init_subscriptions(void);
 static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
                          UA_UInt32 monId, void *monContext, UA_DataValue *value);
+UA_StatusCode get_connection_state( UA_Client *client );
 
 UA_ByteString* loadFile(const char* path);
 UA_ByteString* parse_base64( char* base64string );
@@ -528,6 +529,11 @@ cJSON* opcua_client_update_subscriptions(cJSON* request){
     char *errorString;
     cJSON* response = NULL;
 
+    if (get_connection_state( opcua_client ) != UA_STATUSCODE_GOOD){
+        errorString = "connection error";
+        goto error;
+    };
+
     if (UA_Client_run_iterate(opcua_client, 10) != UA_STATUSCODE_GOOD){
         errorString = "unable update subscriptions";
         goto error;
@@ -545,6 +551,12 @@ error:
         errorString = "programming error in opcua_client_read";
     }
     return on_error( errorString );
+}
+
+UA_StatusCode get_connection_state( UA_Client *client ){
+    UA_StatusCode connectStatus;
+    UA_Client_getState( opcua_client, NULL, NULL, &connectStatus );
+    return connectStatus;
 }
 
 cJSON* opcua_client_browse_endpoints(cJSON* request){
