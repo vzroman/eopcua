@@ -554,9 +554,13 @@ error:
 }
 
 UA_StatusCode get_connection_state( UA_Client *client ){
-    UA_StatusCode connectStatus;
-    UA_Client_getState( opcua_client, NULL, NULL, &connectStatus );
-    return connectStatus;
+    
+    const UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER_SERVERSTATUS);
+
+    UA_NodeId dataType;
+    UA_NodeId_init(&dataType);
+
+    return UA_Client_readDataTypeAttribute(client, nodeId, &dataType);
 }
 
 cJSON* opcua_client_browse_endpoints(cJSON* request){
