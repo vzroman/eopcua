@@ -375,8 +375,9 @@ cJSON* opcua_client_write_item(cJSON* request){
     }
 
     // Write the value
-    if ( UA_Client_writeValueAttribute(opcua_client, nodeId, ua_value) != UA_STATUSCODE_GOOD ){
-        errorString = "error: unable to write value";
+    UA_StatusCode status = UA_Client_writeValueAttribute(opcua_client, nodeId, ua_value);
+    if ( status != UA_STATUSCODE_GOOD ){
+        errorString = UA_StatusCode_name( status );
         goto error;
     }
 

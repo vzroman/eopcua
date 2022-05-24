@@ -308,17 +308,20 @@ loop( Port, Owner, Options ) ->
             ?LOGWARNING("unexpected data is received from the port"),
             loop(Port, Owner, Options);
         { Owner, stop } ->
+            ?LOGINFO("stop the port"),
             Port ! {self(), close},
             receive
                 {Port, closed} -> exit(normal)
             end;
         {'EXIT', Port, Reason} ->
+            ?LOGINFO("port terminated"),
             exit({port_terminated, Reason});
         {'EXIT', Owner, Reason} ->
+            ?LOGINFO("stop the port"),
             port_close( Port ),
             exit( Reason );
-        _Unexpected->
-            % TODO. Log it
+        Unexpected->
+            ?LOGWARNING("unexpected request ~p",[Unexpected]),
             loop(Port, Owner, Options)
     end.
 
