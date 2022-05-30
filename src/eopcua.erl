@@ -48,6 +48,7 @@
 
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
+-define(NO_ACTIVITY_TIMEOUT,300000). % 5 min
 
 -define(FOLDER_TYPE,1).
 -define(TAG_TYPE,2).
@@ -308,21 +309,33 @@ loop( Port, Owner, Options ) ->
             ?LOGWARNING("unexpected data is received from the port"),
             loop(Port, Owner, Options);
         { Owner, stop } ->
-            ?LOGINFO("stop the port"),
+            ?LOGINFO("stopping port"),
             Port ! {self(), close},
             receive
-                {Port, closed} -> exit(normal)
+                {Port, closed} ->
+                    ?LOGINFO("port is closed"),
+                    unlink(Owner),
+                    exit(normal)
+            after
+                30000->
+                    ?LOGERROR("timeout on closing opcua port"),
+                    port_close( Port ),
+                    exit( close_port_timeout )
             end;
         {'EXIT', Port, Reason} ->
             ?LOGINFO("port terminated"),
             exit({port_terminated, Reason});
         {'EXIT', Owner, Reason} ->
-            ?LOGINFO("stop the port"),
+            ?LOGINFO("owner exit closing port"),
             port_close( Port ),
             exit( Reason );
         Unexpected->
             ?LOGWARNING("unexpected request ~p",[Unexpected]),
             loop(Port, Owner, Options)
+    after
+        ?NO_ACTIVITY_TIMEOUT->
+            ?LOGWARNING("no activity, stop the port"),
+            exit( no_activity )
     end.
 
 call( Port, Msg, _Options, Timeout )->
