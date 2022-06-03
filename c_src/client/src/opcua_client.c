@@ -377,7 +377,7 @@ cJSON* opcua_client_write_item(cJSON* request){
     // Write the value
     UA_StatusCode status = UA_Client_writeValueAttribute(opcua_client, nodeId, ua_value);
     if ( status != UA_STATUSCODE_GOOD ){
-        errorString = UA_StatusCode_name( status );
+        errorString = (char*)UA_StatusCode_name( status );
         goto error;
     }
 
@@ -998,7 +998,9 @@ UA_ByteString* loadFile(const char* path){
 	UA_ByteString* result = UA_ByteString_new();
 	UA_ByteString_allocBuffer(result, (size_t)fsize + 1);
 	memset(result->data, 0, result->length);
-	fread(result->data, result->length, 1, f);
+	if (fread(result->data, result->length, 1, f) == 0){
+	    LOGDEBUG("DEBUG: empty file");
+	}
 	fclose(f);
 
 	return result;
