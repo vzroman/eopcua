@@ -15,37 +15,25 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
+#include <eport.h>
+#include <uthash.h>
+#include <open62541/client_config_default.h>
 
-#include <cjson/cJSON.h>
+// Update cycle is 100ms
+#define OPCUA_SERVER_SUBSCRIPTION_CYCLE 100
 
-// The header of the request that defines the total lengsth of the message
-#define HEADER_LENGTH 4
+typedef struct {
+  char *path;
+  int id;
+  UT_hash_handle hh;
+} opcua_client_binding;
 
-// Input file descriptor for receiving requests from erlang
-#define IN_DESC 3
+typedef struct {
+  int id;
+  UA_Variant *value;
+  UT_hash_handle hh;
+} opcua_client_subscription;
 
-// Output file descriptor for sending response to erlang
-#define OUT_DESC 4
 
-// Debug info
-#define EPORT_DEBUG 1
-
-#ifdef EPORT_DEBUG
-
-#define LOGDEBUG(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
-
-#else
-
-#define LOGDEBUG(...) do{  } while(0)
-
-#endif
-
-#define LOGERROR(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
-
-typedef unsigned char byte;
-
-// Callback type 
-typedef char* (*eport_request_handler) (char *);
-
-// The loop definition
-void eport_loop( eport_request_handler callback );
+// The request handler definition
+char* on_request( char *request );

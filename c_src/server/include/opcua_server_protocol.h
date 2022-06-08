@@ -15,37 +15,31 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-
 #include <cjson/cJSON.h>
 
-// The header of the request that defines the total lengsth of the message
-#define HEADER_LENGTH 4
+typedef unsigned long TID;
 
-// Input file descriptor for receiving requests from erlang
-#define IN_DESC 3
+// Command types
+typedef enum OPCUA_CLIENT_CMD_T {
+    OPCUA_CLIENT_CONNECT,
+    OPCUA_CLIENT_READ,
+    OPCUA_CLIENT_WRITE,
+    OPCUA_CLIENT_SUBSCRIBE,
+    OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS,
+    OPCUA_CLIENT_BROWSE_ENDPOINTS,
+    OPCUA_CLIENT_BROWSE_FOLDER
+} OPCUA_CLIENT_CMD;
 
-// Output file descriptor for sending response to erlang
-#define OUT_DESC 4
+// Request
+typedef struct opcua_client_request{
+    OPCUA_CLIENT_CMD cmd;
+    TID tid;
+    cJSON *body;
+} OPCUA_CLIENT_REQUEST;
 
-// Debug info
-#define EPORT_DEBUG 1
+// Parse a request
+int parse_request( const char *message, OPCUA_CLIENT_REQUEST* request );
+void purge_request( OPCUA_CLIENT_REQUEST *request );
 
-#ifdef EPORT_DEBUG
-
-#define LOGDEBUG(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
-
-#else
-
-#define LOGDEBUG(...) do{  } while(0)
-
-#endif
-
-#define LOGERROR(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
-
-typedef unsigned char byte;
-
-// Callback type 
-typedef char* (*eport_request_handler) (char *);
-
-// The loop definition
-void eport_loop( eport_request_handler callback );
+// Build response
+char* create_response( OPCUA_CLIENT_REQUEST *request, cJSON *response );

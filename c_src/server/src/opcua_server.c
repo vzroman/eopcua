@@ -15,37 +15,18 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
+//----------------------------------------
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+//----------------------------------------
+#include "opcua_server.h"
+#include "opcua_server_protocol.h"
+ 
+//------------------------THE ENTRY POINT------------------------------------------------
+int main(int argc, char *argv[]) {
 
-#include <cjson/cJSON.h>
+    LOGDEBUG("DEBUG: enter eport_loop\r\n");
 
-// The header of the request that defines the total lengsth of the message
-#define HEADER_LENGTH 4
-
-// Input file descriptor for receiving requests from erlang
-#define IN_DESC 3
-
-// Output file descriptor for sending response to erlang
-#define OUT_DESC 4
-
-// Debug info
-#define EPORT_DEBUG 1
-
-#ifdef EPORT_DEBUG
-
-#define LOGDEBUG(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
-
-#else
-
-#define LOGDEBUG(...) do{  } while(0)
-
-#endif
-
-#define LOGERROR(...) do{ fprintf(stdout,__VA_ARGS__); } while(0)
-
-typedef unsigned char byte;
-
-// Callback type 
-typedef char* (*eport_request_handler) (char *);
-
-// The loop definition
-void eport_loop( eport_request_handler callback );
+    return EXIT_SUCCESS;
+}
