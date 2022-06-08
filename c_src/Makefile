@@ -57,7 +57,7 @@ CLIENT_CXXFLAGS += $(CXXFLAGS) $(CLIENT_INCLUDE_DIR)
 SERVER_CFLAGS = $(CFLAGS) $(SERVER_INCLUDE_DIR)
 SERVER_CXXFLAGS += $(CXXFLAGS) $(SERVER_INCLUDE_DIR)
 
-LDLIBS += -lssl -lcrypto -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei -L $(OPEN62541_LIB_DIR) -L $(OPEN62541_LIB64_DIR) -lopen62541 -L $(CJSON_LIB_DIR) -L $(CJSON_LIB64_DIR) -lcjson -lcjson_utils
+LDLIBS += -lssl -lcrypto -lpthread -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei -L $(OPEN62541_LIB_DIR) -L $(OPEN62541_LIB64_DIR) -lopen62541 -L $(CJSON_LIB_DIR) -L $(CJSON_LIB64_DIR) -lcjson -lcjson_utils
 
 
 # Verbosity.

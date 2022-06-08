@@ -17,7 +17,6 @@
 ----------------------------------------------------------------*/
 #include <eport.h>
 #include <uthash.h>
-#include <open62541/client_config_default.h>
 
 // Update cycle is 100ms
 #define OPCUA_SERVER_SUBSCRIPTION_CYCLE 100

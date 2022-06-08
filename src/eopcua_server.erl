@@ -15,7 +15,7 @@
 %% specific language governing permissions and limitations
 %% under the License.
 %%----------------------------------------------------------------
--module(eopcua).
+-module(eopcua_server).
 
 -include("eopcua.hrl").
 
@@ -31,27 +31,12 @@
 %%	Protocol API
 %%==============================================================================
 -export([
-    connect/2,connect/3,
-    read/2,read/3,
-    write/2,write/3,
-    subscribe/2,subscribe/3,
-    update_subscriptions/1,update_subscriptions/2,
-    browse_endpoints/2,browse_endpoints/3,
-    browse_folder/2,browse_folder/3,
-    items_tree/1,items_tree/2,
-    create_certificate/1
-]).
-
--export([
-    test/0
+    start_server/2,start_server/3
 ]).
 
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
 -define(NO_ACTIVITY_TIMEOUT,300000). % 5 min
-
--define(FOLDER_TYPE,1).
--define(TAG_TYPE,2).
 
 -define(HEADER_LENGTH,4).
 
@@ -87,159 +72,10 @@ stop(PID) ->
 %         login => <<"user1">>,
 %         password => <<"secret">>
 %     }
-connect(PID, Params)->
-    connect(PID, Params,?RESPONSE_TIMEOUT).
-connect(PID, Params, Timeout)->
-    transaction( PID, <<"connect">>, Params, Timeout ).   
-
-read(PID, Items)->
-    read(PID,Items,?RESPONSE_TIMEOUT).
-read(PID, Items, Timeout) when is_map( Items )->
-    Items1 = maps:to_list( Items ),
-    case read( PID, Items1, Timeout ) of
-        {ok, Results}->
-            Results1 = maps:from_list(lists:zip( Items1, Results )),
-            {ok, Results1};
-        Error->
-            Error
-    end;    
-read(PID, Items, Timeout)->
-    Items1 = 
-        [ binary:split(I, <<"/">>, [global] ) || I <- Items],
-    case transaction( PID, <<"read">>, Items1, Timeout ) of
-        {ok, Values}->
-            Values1 = 
-                [ case V of
-                    <<"error: ", ItemError/binary>>->
-                        {error, ItemError};
-                    _-> V
-                  end || V <- Values ],
-            { ok, Values1 };   
-        Error->
-            Error
-    end.
-
-write(PID, Items)->
-    write(PID,Items,?RESPONSE_TIMEOUT).
-write(PID, Items, Timeout) when is_map( Items )->
-    Items1 = maps:to_list( Items ),
-    case write(PID, Items1, Timeout) of
-        {ok, Results}->
-            Results1 = maps:from_list(lists:zip( Items1, Results )),
-            { ok, Results1 };
-        Error->
-            Error
-    end;
-write(PID, Items, Timeout)->
-    Items1 = 
-        [ [ binary:split(I, <<"/">>, [global] ), V] || {I, V} <- Items],
-    case transaction( PID, <<"write">>, Items1, Timeout ) of
-        {ok, Results}->
-            update_subscriptions(PID),
-            Results1 = 
-                [ case V of
-                    <<"error: ", ItemError/binary>>->
-                        {error, ItemError};
-                    _-> ok
-                  end || V <- Results ],
-            { ok, Results1 };   
-        Error->
-            Error
-    end.    
-
-subscribe(PID, Items)->
-    subscribe(PID,Items,?RESPONSE_TIMEOUT).
-subscribe(PID, Items, Timeout) when is_map(Items)->
-    Items1 = maps:to_list( Items ),
-    case subscribe( PID, Items1, Timeout ) of
-        {ok, Results}->
-            Results1 = maps:from_list(lists:zip( Items1, Results )),
-            {ok, Results1};
-        Error->
-            Error
-    end;
-subscribe(PID, Items, Timeout)->
-    Items1 = 
-        [ binary:split(I, <<"/">>, [global] ) || I <- Items],
-    case transaction( PID, <<"subscribe">>, Items1, Timeout ) of
-        {ok, Values}->
-            Values1 = 
-                [ case V of
-                    <<"error: ", ItemError/binary>>->
-                        {error, ItemError};
-                    _-> V
-                  end || V <- Values ],
-            { ok, Values1 };   
-        Error->
-            Error
-    end.    
-
-update_subscriptions(PID)->
-    update_subscriptions(PID,?RESPONSE_TIMEOUT).
-update_subscriptions(PID, Timeout)->
-    transaction( PID, <<"update_subscriptions">>, <<"true">>, Timeout ).
-
-browse_endpoints(PID, Params)->
-    browse_endpoints(PID, Params,?RESPONSE_TIMEOUT).
-browse_endpoints(PID, Params, Timeout)->
-    transaction( PID, <<"browse_endpoints">>, Params, Timeout ).  
-
-browse_folder(PID, Path)->
-    browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
-browse_folder(PID, Path, Timeout)->
-    transaction( PID, <<"browse_folder">>, Path, Timeout ).  
-
-items_tree(PID)->
-    items_tree(PID, ?RESPONSE_TIMEOUT).
-items_tree(PID, Timeout)->
-    try
-        {ok, items_tree(PID,Timeout,_Path = [])}
-    catch
-        _:Error-> {error, Error}
-    end.
-items_tree(PID,Timeout,Path)->
-    case browse_folder(PID,Path,Timeout) of
-        {ok,Items}->
-            maps:fold(fun(Name,Item,Acc)->
-                case Item of
-                    #{<<"type">> := ?FOLDER_TYPE,<<"id">>:=ID}->
-                        Acc#{Name => #{<<"id">>=>ID, <<"children">>=> items_tree(PID,Timeout,Path ++ [Name])}};
-                    #{<<"type">> := ?TAG_TYPE,<<"id">>:=ID}->
-                        Acc#{Name => ID};
-                    _->
-                        % Ignore other types
-                        Acc
-                end    
-            end,#{},Items);
-        {error,Error}->
-            throw(Error)
-    end.   
-
-create_certificate( Name )->
-    Priv = code:priv_dir(eopcua),
-    Key = Priv++"/eopcua.pem",
-    Cert = Priv++"/eopcua.der",
-
-    Cmd = 
-        "openssl req -new -x509  -config "++
-        Priv++"/cert/example.cert.config -newkey rsa:2048 -keyout "++
-        Key++" -nodes -outform der "++
-        "-subj '/CN="++unicode:characters_to_list(Name)++"' "++
-        "-out "++Cert,
-    
-    Out = os:cmd( Cmd ),
-
-    Result =
-        case { file:read_file(Key), file:read_file(Cert) } of
-            { {ok, KeyData}, {ok, CertData} }->
-                {ok, #{ key => KeyData, certificate => CertData } };
-            _->
-                {error, { Cmd, Out }}
-        end,
-    file:delete(Key),
-    file:delete(Cert),
-
-    Result.
+start_server(PID, Params)->
+    start_server(PID, Params,?RESPONSE_TIMEOUT).
+start_server(PID, Params, Timeout)->
+    transaction( PID, <<"start_server">>, Params, Timeout ).
 
 
 transaction( PID, Command, Body, Timeout )->
@@ -306,27 +142,27 @@ loop( Port, Owner, Options ) ->
             From ! {self(), reply, Result},  
             loop(Port,Owner,Options);
         {Port, {data, _Data}}->
-            ?LOGWARNING("unexpected data is received from the port"),
+            ?LOGWARNING("unexpected data is received from the opcua server port"),
             loop(Port, Owner, Options);
         { Owner, stop } ->
-            ?LOGINFO("stopping port"),
+            ?LOGINFO("stopping opcua server port"),
             Port ! {self(), close},
             receive
                 {Port, closed} ->
-                    ?LOGINFO("port is closed"),
+                    ?LOGINFO("opcua server port is closed"),
                     unlink(Owner),
                     exit(normal)
             after
                 30000->
-                    ?LOGERROR("timeout on closing opcua port"),
+                    ?LOGERROR("timeout on closing opcua server port"),
                     port_close( Port ),
                     exit( close_port_timeout )
             end;
         {'EXIT', Port, Reason} ->
-            ?LOGINFO("port terminated"),
+            ?LOGINFO("opcua server port terminated"),
             exit({port_terminated, Reason});
         {'EXIT', Owner, Reason} ->
-            ?LOGINFO("owner exit closing port"),
+            ?LOGINFO("owner exit closing opcua server port"),
             port_close( Port ),
             exit( Reason );
         Unexpected->
@@ -334,7 +170,7 @@ loop( Port, Owner, Options ) ->
             loop(Port, Owner, Options)
     after
         ?NO_ACTIVITY_TIMEOUT->
-            ?LOGWARNING("no activity, stop the port"),
+            ?LOGWARNING("no activity, stop the opcua server port"),
             exit( no_activity )
     end.
 
@@ -350,7 +186,7 @@ call( Port, Msg, _Options, Timeout )->
 
 %%---------Internal helpers----------------------
 create_program_file( Name )->
-    Dir=code:priv_dir(?MODULE),
+    Dir=code:priv_dir(eopcua),
     Source=
         case os:type() of
             {unix, linux}->atom_to_list( ?MODULE );
@@ -387,22 +223,6 @@ prefix( Name ) when is_binary(Name)->
 prefix( Name ) when is_list(Name)->
     lists:append(string:replace(Name,":","_")).
 
-
-
-test()->
-    {ok,Port} = eopcua:start_link(<<"my_connection">>),
-
-    {ok, Cert} = file:read_file("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.der"),
-    {ok, Key} = file:read_file("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.pem"),
-
-    {ok,<<"ok">>} = eopcua:connect(Port, #{ 
-        host=> <<"localhost">>, 
-        port => 4840, endpoint => <<"OPCUA/SimulationServer">>, 
-        login => <<"test_user">>, 
-        password => <<"111111">>, 
-        certificate=> base64:encode(Cert), 
-        private_key=> base64:encode( Key)
-    }).
 
 
 

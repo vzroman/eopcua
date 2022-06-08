@@ -20,26 +20,20 @@
 typedef unsigned long TID;
 
 // Command types
-typedef enum OPCUA_CLIENT_CMD_T {
-    OPCUA_CLIENT_CONNECT,
-    OPCUA_CLIENT_READ,
-    OPCUA_CLIENT_WRITE,
-    OPCUA_CLIENT_SUBSCRIBE,
-    OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS,
-    OPCUA_CLIENT_BROWSE_ENDPOINTS,
-    OPCUA_CLIENT_BROWSE_FOLDER
-} OPCUA_CLIENT_CMD;
+typedef enum OPCUA_SERVER_CMD_T {
+    OPCUA_SERVER_START
+} OPCUA_SERVER_CMD;
 
 // Request
-typedef struct opcua_client_request{
-    OPCUA_CLIENT_CMD cmd;
+typedef struct opcua_server_request{
+    OPCUA_SERVER_CMD cmd;
     TID tid;
     cJSON *body;
-} OPCUA_CLIENT_REQUEST;
+} OPCUA_SERVER_REQUEST;
 
 // Parse a request
-int parse_request( const char *message, OPCUA_CLIENT_REQUEST* request );
-void purge_request( OPCUA_CLIENT_REQUEST *request );
+int parse_request( const char *message, OPCUA_SERVER_REQUEST* request );
+void purge_request( OPCUA_SERVER_REQUEST *request );
 
 // Build response
-char* create_response( OPCUA_CLIENT_REQUEST *request, cJSON *response );
+char* create_response( OPCUA_SERVER_REQUEST *request, cJSON *response );
