@@ -59,21 +59,19 @@
 %%	Control API
 %%==============================================================================
 start_link(Name) ->
-    start_link(Name,#{ timeout => ?CONNECT_TIMEOUT }).
-start_link(Name, #{timeout := Timeout } = Options) ->
-    Self = self(),
-    PID = spawn_link(fun()->init( Name, Self, Options ) end),
-    receive
-        {PID,connected}-> {ok,PID};
-        {'EXIT', PID, Reason}-> {error, Reason}
-    after
-        Timeout->
-            stop(PID),
-            { error, timeout }
-    end.
+    start_link(Name,#{ response_timeout => ?RESPONSE_TIMEOUT }).
+start_link(Name, Options) ->
+    Dir=code:priv_dir(eopcua),
+    Source=
+        case os:type() of
+            {unix, linux}->atom_to_list( ?MODULE );
+            {win32, _}->atom_to_list( ?MODULE ) ++ ".exe"
+        end,
+    SourcePath = unicode:characters_to_binary(Dir ++ "/" ++ Source),
+    eport_c:start_link(SourcePath, Name, Options).
 
 stop(PID) ->
-    PID ! { self(), stop }.
+    eport_c:stop( PID ).
 
 %%==============================================================================
 %%	Protocol API
@@ -88,9 +86,9 @@ stop(PID) ->
 %         password => <<"secret">>
 %     }
 connect(PID, Params)->
-    connect(PID, Params,?RESPONSE_TIMEOUT).
+    connect(PID, Params,?CONNECT_TIMEOUT).
 connect(PID, Params, Timeout)->
-    transaction( PID, <<"connect">>, Params, Timeout ).   
+    eport_c:request( PID, <<"connect">>, Params, Timeout ).   
 
 read(PID, Items)->
     read(PID,Items,?RESPONSE_TIMEOUT).
@@ -106,7 +104,7 @@ read(PID, Items, Timeout) when is_map( Items )->
 read(PID, Items, Timeout)->
     Items1 = 
         [ binary:split(I, <<"/">>, [global] ) || I <- Items],
-    case transaction( PID, <<"read">>, Items1, Timeout ) of
+    case eport_c:request( PID, <<"read">>, Items1, Timeout ) of
         {ok, Values}->
             Values1 = 
                 [ case V of
@@ -133,7 +131,7 @@ write(PID, Items, Timeout) when is_map( Items )->
 write(PID, Items, Timeout)->
     Items1 = 
         [ [ binary:split(I, <<"/">>, [global] ), V] || {I, V} <- Items],
-    case transaction( PID, <<"write">>, Items1, Timeout ) of
+    case eport_c:request( PID, <<"write">>, Items1, Timeout ) of
         {ok, Results}->
             update_subscriptions(PID),
             Results1 = 
@@ -161,7 +159,7 @@ subscribe(PID, Items, Timeout) when is_map(Items)->
 subscribe(PID, Items, Timeout)->
     Items1 = 
         [ binary:split(I, <<"/">>, [global] ) || I <- Items],
-    case transaction( PID, <<"subscribe">>, Items1, Timeout ) of
+    case eport_c:request( PID, <<"subscribe">>, Items1, Timeout ) of
         {ok, Values}->
             Values1 = 
                 [ case V of
@@ -177,17 +175,17 @@ subscribe(PID, Items, Timeout)->
 update_subscriptions(PID)->
     update_subscriptions(PID,?RESPONSE_TIMEOUT).
 update_subscriptions(PID, Timeout)->
-    transaction( PID, <<"update_subscriptions">>, <<"true">>, Timeout ).
+    eport_c:request( PID, <<"update_subscriptions">>, <<"true">>, Timeout ).
 
 browse_endpoints(PID, Params)->
     browse_endpoints(PID, Params,?RESPONSE_TIMEOUT).
 browse_endpoints(PID, Params, Timeout)->
-    transaction( PID, <<"browse_endpoints">>, Params, Timeout ).  
+    eport_c:request( PID, <<"browse_endpoints">>, Params, Timeout ).  
 
 browse_folder(PID, Path)->
     browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
 browse_folder(PID, Path, Timeout)->
-    transaction( PID, <<"browse_folder">>, Path, Timeout ).  
+    eport_c:request( PID, <<"browse_folder">>, Path, Timeout ).  
 
 items_tree(PID)->
     items_tree(PID, ?RESPONSE_TIMEOUT).
@@ -241,163 +239,15 @@ create_certificate( Name )->
 
     Result.
 
-
-transaction( PID, Command, Body, Timeout )->
-    TID = rand:uniform(16#FFFF),
-    Request = #{
-        <<"cmd">> => Command,
-        <<"tid">> => TID,
-        <<"body">> => Body
-    },
-    PID ! { self(), call, jsx:encode(Request), Timeout },
-    wait_for_reply( PID, Command, TID, Timeout ).
-
-wait_for_reply( PID, Command, TID, Timeout )->
-    receive
-        {PID, reply, {ok, Result} }-> 
-            case try jsx:decode(Result, [return_maps]) catch _:_->{invalid_json, Result } end of
-                #{<<"cmd">> := Command, <<"tid">> := TID, <<"reply">> := Reply}-> 
-                    case Reply of
-                        #{<<"type">> := <<"ok">>, <<"result">> := CmdResult}->
-                            {ok, CmdResult};
-                        #{<<"type">> := <<"error">>, <<"text">> := Error}->
-                            {error, Error};
-                        Unexpected->
-                            {error, {unexpected_port_reply, Unexpected} }
-                    end;
-                Unexpected->
-                    ?LOGWARNING("unexpected reply from the port ~p",[Unexpected]),
-                    wait_for_reply( PID, Command, TID, Timeout )
-            end;
-        {PID, reply, Error }->
-            Error
-    after
-        Timeout-> {error, timeout}
-    end.    
-%%==============================================================================
-%%	Initialization procedure
-%%==============================================================================
-init( Name, Owner, Options ) ->
-    process_flag(trap_exit, true),
-    case init_ext_programm( Name ) of
-        {ok,Port}->
-            Owner ! {self(),connected},
-            loop(Port, Owner, Options);    
-        InitError->
-            Owner ! InitError
-    end.
-
-init_ext_programm( Name )->
-    try 
-        Program = create_program_file( Name ),
-        Port = open_port({spawn, Program}, [{packet, ?HEADER_LENGTH}, binary, nouse_stdio]),
-        {ok,Port}
-    catch
-        _:Error->{error,Error}
-    end.
-
-%%==============================================================================
-%%	THE LOOP
-%%==============================================================================
-loop( Port, Owner, Options ) ->
-    receive
-        {From, call, Msg, Timeout} ->
-            Result = call( Port, Msg, Options, Timeout ),
-            From ! {self(), reply, Result},  
-            loop(Port,Owner,Options);
-        {Port, {data, _Data}}->
-            ?LOGWARNING("unexpected data is received from the opcua client port"),
-            loop(Port, Owner, Options);
-        { Owner, stop } ->
-            ?LOGINFO("stopping opcua client port"),
-            Port ! {self(), close},
-            receive
-                {Port, closed} ->
-                    ?LOGINFO("opcua client port is closed"),
-                    unlink(Owner),
-                    exit(normal)
-            after
-                30000->
-                    ?LOGERROR("timeout on closing opcua client port"),
-                    port_close( Port ),
-                    exit( close_port_timeout )
-            end;
-        {'EXIT', Port, Reason} ->
-            ?LOGINFO("opcua client port terminated"),
-            exit({port_terminated, Reason});
-        {'EXIT', Owner, Reason} ->
-            ?LOGINFO("owner exit closing opcua client port"),
-            port_close( Port ),
-            exit( Reason );
-        Unexpected->
-            ?LOGWARNING("unexpected request ~p",[Unexpected]),
-            loop(Port, Owner, Options)
-    after
-        ?NO_ACTIVITY_TIMEOUT->
-            ?LOGWARNING("no activity, stop the opcua client port"),
-            exit( no_activity )
-    end.
-
-call( Port, Msg, _Options, Timeout )->
-    Port ! {self(), {command, Msg}},
-    receive
-        {Port, {data, Data}} ->
-            {ok, Data }
-    after
-        Timeout->
-            {error, timeout}
-    end.
-
-%%---------Internal helpers----------------------
-create_program_file( Name )->
-    Dir=code:priv_dir(eopcua),
-    Source=
-        case os:type() of
-            {unix, linux}->atom_to_list( ?MODULE );
-            {win32, _}->atom_to_list( ?MODULE ) ++ ".exe"
-        end,
-    SourcePath = Dir ++ "/" ++ Source,
-    case filelib:is_file(SourcePath) of 
-        true->
-            case os:type() of
-                {win32, _}->
-                    % If the OS is windows we cannot launch severel instances fof the same program, to 
-                    % coup with the limitation we create another copy of the file with a different unique name
-                    UniquePath = Dir ++ prefix( Name ) ++ "_"++ Source,
-                    case filelib:is_file(UniquePath) of
-                        true-> 
-                            UniquePath;
-                        false->
-                            case file:copy(SourcePath, UniquePath) of
-                                {ok,_}->
-                                    UniquePath;
-                                Error->
-                                    throw(Error)
-                            end
-                    end;
-                _->
-                    SourcePath
-            end;
-        false->
-            throw({ file_not_found, SourcePath })
-    end.
-
-prefix( Name ) when is_binary(Name)->
-    prefix(binary_to_list(Name));
-prefix( Name ) when is_list(Name)->
-    lists:append(string:replace(Name,":","_")).
-
-
-
 test()->
     {ok,Port} = eopcua_client:start_link(<<"my_connection">>),
 
-    {ok, Cert} = file:read_file("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.der"),
-    {ok, Key} = file:read_file("/home/roman/PROJECTS/SOURCE/OPCUA/eopcua/cert/eopcua.pem"),
+    {ok, Cert} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.der"),
+    {ok, Key} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.pem"),
 
     {ok,<<"ok">>} = eopcua_client:connect(Port, #{
         host=> <<"localhost">>, 
-        port => 4840, endpoint => <<"OPCUA/SimulationServer">>, 
+        port => 53530, endpoint => <<"OPCUA/SimulationServer">>, 
         login => <<"test_user">>, 
         password => <<"111111">>, 
         certificate=> base64:encode(Cert), 

@@ -3,7 +3,8 @@
         "cstddef": "cpp",
         "*.tcc": "c",
         "cstdlib": "c",
-        "memory": "c"
+        "memory": "c",
+        "eport_c.h": "c"
     },
     "erlang.includePaths":[
         "include"

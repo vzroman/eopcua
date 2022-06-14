@@ -19,6 +19,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+
+//----------------------------------------
+#include <eport_c.h>
 //----------------------------------------
 #include <open62541/client_config_default.h>
 #include <open62541/client_highlevel.h>
@@ -34,24 +37,24 @@
 #include <openssl/bio.h>
 //----------------------------------------
 #include "opcua_client.h"
-#include "opcua_client_protocol.h"
- 
-cJSON* on_error(char* text);
-cJSON* on_ok(cJSON* response);
-cJSON* opcua_client_connect(cJSON* request);
-cJSON* opcua_client_read(cJSON* request);
-cJSON* opcua_client_read_item(cJSON* request);
-cJSON* opcua_client_write(cJSON* request);
-cJSON* opcua_client_write_item(cJSON* request);
-cJSON* opcua_client_subscribe(cJSON* request);
-cJSON* opcua_client_subscribe_item(cJSON* request);
-cJSON* opcua_client_update_subscriptions(cJSON* request);
-cJSON* opcua_client_browse_endpoints(cJSON* request);
-cJSON* opcua_client_browse_folder(cJSON* request);
+  
+LOGLEVEL(EPORT_C_LOGLEVEL_INFO);  
+cJSON* on_request(char* method, cJSON *args, char **error);
+
+cJSON* opcua_client_connect(cJSON* args, char **error);
+cJSON* opcua_client_read(cJSON* args, char **error);
+cJSON* opcua_client_read_item(cJSON* args, char **error);
+cJSON* opcua_client_write(cJSON* args, char **error);
+cJSON* opcua_client_write_item(cJSON* args, char **error);
+cJSON* opcua_client_subscribe(cJSON* args, char **error);
+cJSON* opcua_client_subscribe_item(cJSON* args, char **error);
+cJSON* opcua_client_update_subscriptions(cJSON* args, char **error);
+cJSON* opcua_client_browse_endpoints(cJSON* args, char **error);
+cJSON* opcua_client_browse_folder(cJSON* args, char **error);
 
 int path2nodeId( cJSON *path, UA_NodeId *node );
 char* path2string( cJSON *path );
-cJSON* browse_folder( UA_NodeId folder );
+cJSON* browse_folder( UA_NodeId folder, char **error );
 cJSON* parse_value( UA_Variant *value );
 int export_value(UA_Variant *ua_value, cJSON *value);
 int init_subscriptions(void);
@@ -71,120 +74,144 @@ UA_UInt32 subscriptionId;
 opcua_client_binding *opcua_client_bindings = NULL;
 opcua_client_subscription *opcua_client_subscriptions = NULL;
 
-char* on_request( char *requestString ){
-    cJSON *response;
-    char *responseString;
-    OPCUA_CLIENT_REQUEST request = {};
-
-    // Parse the request
-    LOGDEBUG("DEBUG: parsing the request\r\n");
-    if (parse_request( requestString, &request ) != 0){
-        response = on_error("invalid request");
-    }else{
-        // Handle the request
-        LOGDEBUG("DEBUG: handle the request\r\n");
-        if( request.cmd == OPCUA_CLIENT_CONNECT ){
-            response = opcua_client_connect( request.body );
-        } else if (request.cmd == OPCUA_CLIENT_READ ){
-            response = opcua_client_read( request.body );
-        }else if (request.cmd == OPCUA_CLIENT_WRITE ){
-            response = opcua_client_write( request.body );
-        }else if (request.cmd == OPCUA_CLIENT_SUBSCRIBE ){
-            response = opcua_client_subscribe( request.body );
-        }else if (request.cmd == OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS ){
-            response = opcua_client_update_subscriptions( request.body );
-        }else if (request.cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
-            response = opcua_client_browse_endpoints( request.body );
-        }else if (request.cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
-            response = opcua_client_browse_folder( request.body );
-        } else{
-            response = on_error("unsupported command type");
-        }
-    }
-
-    // Reply (purges the response)
-    responseString = create_response( &request, response );
-
-    purge_request( &request );
-    LOGDEBUG("DEBUG: response %s\r\n",responseString);
-
-    return responseString;
-}
-
-cJSON* on_error(char* text){
-    cJSON *response = cJSON_CreateObject();
-    if (cJSON_AddStringToObject(response, "type", "error") == NULL) {
-        goto error;
-    }
-    if (cJSON_AddStringToObject(response, "text", text) == NULL) {
-        goto error;
-    }
-    return response;
-
-error:
-    cJSON_Delete( response );
-    return NULL;
-}
-
-cJSON* on_ok(cJSON *result){
-    cJSON *response = cJSON_CreateObject();
-    if ( cJSON_AddStringToObject(response, "type", "ok") == NULL) {
-        goto error;
-    }
-    if ( !cJSON_AddItemToObject(response, "result", result) ) {
-        goto error;
-    }
-    return response;
-
-error:
-    cJSON_Delete( response );
-    return NULL;
-}
-
-cJSON* opcua_client_connect(cJSON* request){
+cJSON* on_request( char *method, cJSON *args, char **error ){
+    
     cJSON *response = NULL;
-    char *errorString = NULL;
+    // Handle the request
+    LOGDEBUG("handle the request");
+    if( strcmp(method, "connect") == 0){
+        response = opcua_client_connect( args, error );
+    } else if (strcmp(method, "read") == 0){
+        response = opcua_client_read( args, error );
+    }else if (strcmp(method, "write") == 0){
+        response = opcua_client_write( args, error );
+    }else if (strcmp(method, "subscribe") == 0){
+        response = opcua_client_subscribe( args, error );
+    }else if (strcmp(method, "update_subscriptions") == 0){
+        response = opcua_client_update_subscriptions( args, error );
+    }else if (strcmp(method, "browse_endpoints") == 0){
+        response = opcua_client_browse_endpoints( args, error );
+    }else if (strcmp(method, "browse_folder") == 0){
+        response = opcua_client_browse_folder( args, error );
+    } else{
+        *error = "invalid method";
+    }
+
+    return response;
+}
+
+// The expected structure is:
+//     {
+//         "host": "localhost",
+//         "port": 4841,
+//         ----optional---------
+//         "endpoint": "OPCUA/SimulationServer",
+//         "certificate": "<base64 encoded der>",
+//         "privateKey": "<base64 encoded pem>",
+//         "login":"user1",
+//         "password":"secret"
+//     }
+cJSON* opcua_client_connect(cJSON* args, char **error){
+    cJSON *response = NULL;
+
+    cJSON *host = NULL;
+    cJSON *endpoint = NULL;
+    cJSON *port = NULL;
+    cJSON *login = NULL;
+    cJSON *certificate = NULL;
+    cJSON *privateKey = NULL;
+    cJSON *password = NULL;
+    char *connectionString = NULL;
+    char *URI = NULL;
+
+    //---------------parsing arguments------------------------
+    host = cJSON_GetObjectItemCaseSensitive(args, "host");
+    if (!cJSON_IsString(host) || (host->valuestring == NULL)){
+        *error = "host is not defined";
+        goto on_error; 
+    }
+    port = cJSON_GetObjectItemCaseSensitive(args, "port");
+    if (!cJSON_IsNumber(port)){
+        *error = "port is not defined";
+        goto on_error; 
+    }
+
+    endpoint = cJSON_GetObjectItemCaseSensitive(args, "endpoint");
+    if (!cJSON_IsString(endpoint) || (endpoint->valuestring == NULL)){
+        endpoint = NULL;
+    }
+
+    certificate = cJSON_GetObjectItemCaseSensitive(args, "certificate");
+    if (cJSON_IsString(certificate) && (certificate->valuestring != NULL)){
+        // It is a secure connection, the key must be provided
+        privateKey = cJSON_GetObjectItemCaseSensitive(args, "private_key");
+        if (!cJSON_IsString(privateKey) || (privateKey->valuestring == NULL)){
+            *error = "key is not defined";
+            goto on_error; 
+        }
+    }else{
+        certificate = NULL;
+    }
+
+    login = cJSON_GetObjectItemCaseSensitive(args, "login");
+    if (cJSON_IsString(login) && (login->valuestring != NULL)){
+
+        // If the login is provided then the password is required
+        password = cJSON_GetObjectItemCaseSensitive(args, "password");
+        if (!cJSON_IsString(password) || (password->valuestring == NULL)){
+            *error = "password is not defined";
+            goto on_error; 
+        }
+    }else{
+        login = NULL;
+    }
+
+    // Build the connection string (6 in tail is :<port> as port max string length is 5)
+    char *prefix = "opc.tcp://";
+    int urlLen = strlen(prefix) + strlen(host->valuestring) + 6; // :65535 is max
+    if (endpoint != NULL){
+        urlLen += strlen( endpoint->valuestring );
+    }
+
+    connectionString = malloc( urlLen );
+    if (endpoint != NULL){
+        sprintf(connectionString, "%s%s:%d/%s", prefix, host->valuestring, (int)port->valuedouble, endpoint->valuestring);
+    }else{
+        sprintf(connectionString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
+    }
+    LOGINFO("connecting to %s",connectionString);
+
+    //--------------Connecting procedure------------------------------
     UA_StatusCode retval;
 
+    // get the config object
     UA_ClientConfig *config = UA_Client_getConfig(opcua_client);
-
-    // Connection params
-    cJSON *url = cJSON_GetObjectItemCaseSensitive(request, "url");
-    cJSON *certificate = cJSON_GetObjectItemCaseSensitive(request, "certificate");
-    cJSON *privateKey = cJSON_GetObjectItemCaseSensitive(request, "private_key");
-    cJSON *login = cJSON_GetObjectItemCaseSensitive(request, "login");
-    cJSON *password = cJSON_GetObjectItemCaseSensitive(request, "password");
+    
     UA_ByteString *cert = NULL;
     UA_ByteString *key = NULL;
 
-    char *URI = NULL;
-
     // Configure the connection
     if (cJSON_IsString(certificate)){
-        LOGDEBUG("DEBUG: prepare secure connection\r\n");
+        LOGTRACE("prepare secure connection");
 
-        LOGDEBUG("DEBUG: parse base64 certificate\r\n");
         cert = parse_base64( certificate->valuestring );
         if (cert == NULL){
-            errorString = "unable to parse the certificate from base64";
-            goto error;
+            *error = "unable to parse the certificate from base64";
+            goto on_error;
         }
 
-        LOGDEBUG("DEBUG: parse base64 key\r\n");
         key = parse_base64( privateKey->valuestring );
         if (key == NULL){
-            errorString = "unable to parse the key from base64";
-            goto error;
+            *error = "unable to parse the key from base64";
+            goto on_error;
         }
 
         // Parse the application URI from the certificate
-        LOGDEBUG("DEBUG: parse_certificate_uri\r\n");
-        char *URI = parse_certificate_uri( (const unsigned char *)cert->data, cert->length );   
+        URI = parse_certificate_uri( (const unsigned char *)cert->data, cert->length );   
         if (URI == NULL){
-            errorString = "unable to parse the certificate";
-            goto error;
+            *error = "unable to parse the certificate";
+            goto on_error;
         } 
-        LOGDEBUG("DEBUG: application URI: %s\r\n",URI);
 
         // Trust list
         size_t trustListSize = 0;
@@ -194,15 +221,13 @@ cJSON* opcua_client_connect(cJSON* request){
         UA_ByteString *revocationList = NULL;
         size_t revocationListSize = 0;
 
-        LOGDEBUG("DEBUG: UA_MESSAGESECURITYMODE_SIGNANDENCRYPT\r\n");
-
         config->securityMode = UA_MESSAGESECURITYMODE_SIGNANDENCRYPT;
         if (UA_ClientConfig_setDefaultEncryption(config, *cert, *key,
                                             trustList, trustListSize,
                                             revocationList, revocationListSize) 
             != UA_STATUSCODE_GOOD){
-            errorString = "unable to configure a secure connection";
-            goto error;
+            *error = "unable to configure a secure connection";
+            goto on_error;
         };
 
         config->clientDescription.applicationUri = UA_STRING_ALLOC(URI);
@@ -210,37 +235,31 @@ cJSON* opcua_client_connect(cJSON* request){
         free(URI);
         URI = NULL;
     }else{
-        LOGDEBUG("DEBUG: unsecure connection\r\n");
         UA_ClientConfig_setDefault(config);
     }
 
     if (cJSON_IsString(login)){
         // Authorized access
-        LOGDEBUG("DEBUG: authorized connection to %s, user %s\r\n", url->valuestring,login->valuestring);
-        retval = UA_Client_connectUsername(opcua_client, url->valuestring, login->valuestring, password->valuestring);
+        LOGINFO("authorized connection to %s, user %s", connectionString,login->valuestring);
+        retval = UA_Client_connectUsername(opcua_client, connectionString, login->valuestring, password->valuestring);
     }else{
-        LOGDEBUG("DEBUG: anonymous connection to %s\r\n", url->valuestring);
-        retval = UA_Client_connect(opcua_client, url->valuestring);
+        LOGINFO("anonymous connection to %s", connectionString);
+        retval = UA_Client_connect(opcua_client, connectionString);
     }
 
     if(retval != UA_STATUSCODE_GOOD) {
-        errorString = "connection error";
-        goto error;
+        *error = "connection error";
+        goto on_error;
     }
 
     if (init_subscriptions() != 0){
-        errorString = "init subscription error";
-        goto error;
+        *error = "init subscriptions error";
+        goto on_error;
     }
 
-    response = cJSON_CreateString("ok");
-    if (response == NULL){
-        goto error;
-    }
+    return cJSON_CreateString("ok");
 
-    return on_ok( response );
-
-error:
+on_error:
     if (URI != NULL){
         free(URI);
     }
@@ -251,191 +270,187 @@ error:
         UA_ByteString_clear( key );
     }
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_connect";
-    }
-    return on_error( errorString );
+    return NULL;
 }
 
 //---------------------------------------------------------------
 //  READ
 //---------------------------------------------------------------
-cJSON* opcua_client_read(cJSON* request){
-    LOGDEBUG("DEBUG: reading\r\n");
-    char *errorString = NULL;
+cJSON* opcua_client_read(cJSON* args, char **error){
+    LOGTRACE("reading");
     cJSON *response = cJSON_CreateArray();
     cJSON *item = NULL;
     cJSON *value = NULL;
 
-    cJSON_ArrayForEach(item, request) {
-        value = opcua_client_read_item( item );
+    if ( !cJSON_IsArray(args) ) {
+        *error = "invalid read arguments";
+        goto on_error;
+    }
+
+    cJSON_ArrayForEach(item, args) {
+        value = opcua_client_read_item( item, error );
+        if (value == NULL){
+            value = cJSON_CreateString("error: read error");
+        }
         if ( !cJSON_AddItemToArray(response, value) ){
-            LOGERROR("ERROR: unable add a value for item\r\n");
-            goto error;
+            *error = "unable add a value for item";
+            goto on_error;
         }
     }
 
-    return on_ok( response );
-error:
+    return response;
+on_error:
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_read";
-    }
-    return on_error( errorString );
+    return NULL;
 }
 
-cJSON* opcua_client_read_item(cJSON* request){
-    char *errorString = NULL;
-    UA_Variant *value = UA_Variant_new();
+cJSON* opcua_client_read_item(cJSON* args, char **error){
     cJSON *response = NULL;
-    LOGDEBUG("DEBUG: reading item\r\n");
+    UA_Variant *value = UA_Variant_new();
 
     UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-    int ret = path2nodeId( request, &nodeId );
+    int ret = path2nodeId( args, &nodeId );
     if (ret != 0){
-        errorString = "error: invalid node path";
-        goto error;
+        *error = "invalid node path";
+        goto on_error;
     }
 
     /* Read the value */
     if (UA_Client_readValueAttribute(opcua_client, nodeId, value) != UA_STATUSCODE_GOOD ) {
-        errorString = "error: unable to read value";
-        goto error;
+        *error = "unable to read value";
+        goto on_error;
     }
 
-    response = parse_value( value );    
-    if (response == NULL){
-        errorString = "error: invalid value";
-        goto error;
-    }
-
+    response = parse_value( value ); 
     UA_Variant_delete(value);
+
+    if (response == NULL){
+        *error = "invalid value";
+        goto on_error;
+    }
 
     return response;
 
-error:
-    UA_Variant_delete(value);
+on_error:
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "error: programming error in opcua_client_read";
-    }
-    return cJSON_CreateString(errorString);
+    return NULL;
 }
 
 //---------------------------------------------------------------
 //  WRITE
 //---------------------------------------------------------------
-cJSON* opcua_client_write(cJSON* request){
-    LOGDEBUG("DEBUG: writing\r\n");
-    char *errorString = NULL;
+cJSON* opcua_client_write(cJSON* args, char **error){
+    LOGTRACE("writing");
     cJSON *response = cJSON_CreateArray();
     cJSON *item = NULL;
     cJSON *result = NULL;
 
-    cJSON_ArrayForEach(item, request) {
-        result = opcua_client_write_item( item );
+if ( !cJSON_IsArray(args) ) {
+        *error = "invalid write parameters";
+        goto on_error;
+    }
+
+    cJSON_ArrayForEach(item, args) {
+        result = opcua_client_write_item( item, error );
+        if (result == NULL){
+            result = cJSON_CreateString("error: write error");
+        }
         if ( !cJSON_AddItemToArray(response, result) ){
-            LOGERROR("ERROR: unable add a result for item\r\n");
-            goto error;
+            *error = "unable add a result for item";
+            goto on_error;
         }
     }
 
-    return on_ok( response );
-error:
+    return response;
+on_error:
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_read";
-    }
-    return on_error( errorString );
+    return NULL;
 }
 
-cJSON* opcua_client_write_item(cJSON* request){
-    char *errorString = NULL;
+cJSON* opcua_client_write_item(cJSON* args, char **error){
     cJSON *response = NULL;
     UA_Variant *ua_value = UA_Variant_new();
-    LOGDEBUG("DEBUG: writing item\r\n");
 
-    cJSON *tag = cJSON_GetArrayItem(request, 0);
-    cJSON *value = cJSON_GetArrayItem(request, 1);
+    cJSON *tag = cJSON_GetArrayItem(args, 0);
+    cJSON *value = cJSON_GetArrayItem(args, 1);
 
     // Get the type of the tag
     UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
     int ret = path2nodeId( tag, &nodeId );
     if (ret != 0){
-        errorString = "error: invalid node path";
-        goto error;
+        *error = "invalid node path";
+        goto on_error;
     }
     if (UA_Client_readValueAttribute(opcua_client, nodeId, ua_value) != UA_STATUSCODE_GOOD ) {
-        errorString = "error: unable to define tag type";
-        goto error;
+        *error = "unable to define tag type";
+        goto on_error;
     }
+
     if ( export_value(ua_value, value) != 0 ){
-        errorString = "error: invalid value";
-        goto error;
+        *error = "invalid value";
+        goto on_error;
     }
 
     // Write the value
     UA_StatusCode status = UA_Client_writeValueAttribute(opcua_client, nodeId, ua_value);
     if ( status != UA_STATUSCODE_GOOD ){
-        errorString = (char*)UA_StatusCode_name( status );
-        goto error;
-    }
-
-    response = cJSON_CreateString("ok");
-    if (response == NULL){
-        goto error;
+        *error = (char*)UA_StatusCode_name( status );
+        goto on_error;
     }
 
     UA_Variant_delete(ua_value);
-    
-    return response;
 
-error:
+    return cJSON_CreateString("ok");
+
+on_error:
+    cJSON_Delete( response );
     UA_Variant_delete( ua_value );
-    if (errorString == NULL){
-        errorString = "error: programming error in opcua_client_write";
-    }
-    return cJSON_CreateString(errorString);
+    return NULL;
 }
 
 //---------------------------------------------------------------
 //  SUBSCRIBE
 //---------------------------------------------------------------
-cJSON* opcua_client_subscribe(cJSON* request){
-    LOGDEBUG("DEBUG: subscribing\r\n");
-    char *errorString = NULL;
+cJSON* opcua_client_subscribe(cJSON* args, char **error){
+    LOGTRACE("subscribing");
     cJSON *response = cJSON_CreateArray();
     cJSON *item = NULL;
     cJSON *result = NULL;
 
-    cJSON_ArrayForEach(item, request) {
-        result = opcua_client_subscribe_item( item );
+    if ( !cJSON_IsArray(args) ) {
+        *error = "invalid subscribe parameters";
+        goto on_error;
+    }
+
+    cJSON_ArrayForEach(item, args) {
+        result = opcua_client_subscribe_item( item, error );
+        if (result == NULL){
+            result = cJSON_CreateString("error: subscribe error");
+        }
         if ( !cJSON_AddItemToArray(response, result) ){
-            LOGERROR("ERROR: unable add a result for item\r\n");
-            goto error;
+            *error = "unable add a result for item";
+            goto on_error;
         }
     }
 
-    return on_ok( response );
-error:
+    return response;
+on_error:
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_subscribe";
-    }
-    return on_error( errorString );
+    return NULL;
 }
 
-cJSON* opcua_client_subscribe_item(cJSON* request){
-    char *errorString = NULL;
+cJSON* opcua_client_subscribe_item(cJSON* args, char **error){
+    LOGTRACE("subscribing to an item");
+
     cJSON *response = NULL;
     char *path = NULL;
-    LOGDEBUG("DEBUG: subscribing to an item\r\n");
+    
 
     // Get the key to the binding
-    path = path2string( request );
+    path = path2string( args );
     if (path == NULL){
-        errorString = "error: unable to convert the node path to string";
-        goto error;
+        *error = "unable to convert the node path to string";
+        goto on_error;
     }
 
     // Lookup the binding in the collection
@@ -446,14 +461,14 @@ cJSON* opcua_client_subscribe_item(cJSON* request){
     if (b == NULL){
         // The binding is not in the collection yet.
         // Create a new subscription.
-        LOGDEBUG("DEBUG: create a new subscription\r\n");
+        LOGTRACE("create a new subscription");
 
         // Get nodeId
         UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-        int ret = path2nodeId( request, &nodeId );
+        int ret = path2nodeId( args, &nodeId );
         if (ret != 0){
-            errorString = "error: invalid node path";
-            goto error;
+            *error = "invalid node path";
+            goto on_error;
         }
 
         // Add the binding to the monitored items
@@ -462,26 +477,26 @@ cJSON* opcua_client_subscribe_item(cJSON* request){
         UA_Client_MonitoredItems_createDataChange(opcua_client, subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
                                                 monRequest, NULL, on_subscription_update, NULL);
 
-        LOGDEBUG("DEBUG: monResponse.monitoredItemId %d\r\n", monResponse.monitoredItemId);
+        LOGDEBUG("monResponse.monitoredItemId %d", monResponse.monitoredItemId);
 
         if(monResponse.statusCode != UA_STATUSCODE_GOOD){
-            errorString = "error: uanble to add a monitored item";
-            goto error;
+            *error = "uanble to add a monitored item";
+            goto on_error;
         }
 
         // Add the binding to the collection
         b = (opcua_client_binding *)malloc(sizeof *b);
         if (b == NULL){
-            errorString = "error: uanble to allocate the memory for a new binding index";
-            goto error;
+            *error = "unable to allocate the memory for a new binding index";
+            goto on_error;
         }
         b->path = path;
         b->id = monResponse.monitoredItemId;
 
         s = (opcua_client_subscription *)malloc(sizeof *s);
         if (s == NULL){
-            errorString = "error: unable to allocate the memory for new binding";
-            goto error;
+            *error = "unable to allocate the memory for new binding";
+            goto on_error;
         }
         s->id = monResponse.monitoredItemId;
         s->value = UA_Variant_new();
@@ -492,66 +507,51 @@ cJSON* opcua_client_subscribe_item(cJSON* request){
         // The subscription is already created, we should not clear the path from this moment
         path = NULL;
 
-        return opcua_client_read_item( request );
+        return opcua_client_read_item( args, error );
     }else{
         free( path );
         path = NULL;
         // The binding is already in the active subscriptions
-        LOGDEBUG("DEBUG: lookup the value in the active subscriptions\r\n");
+        LOGTRACE("lookup the value in the active subscriptions");
 
         // Lookup the value
         HASH_FIND_INT(opcua_client_subscriptions, &b->id, s);
         if (s == NULL){
-            errorString = "error: invalid subscription index";
-            goto error;
+            *error = "invalid subscription index";
+            goto on_error;
         }
 
         response = parse_value( s->value );
         if (response == NULL){
-            errorString = "error: invalid value";
-            goto error;
+            *error = "invalid value";
+            goto on_error;
         }
     }
 
     return response;
 
-error:
+on_error:
     if (path != NULL){
         free(path);
     }
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_read";
-    }
-    return cJSON_CreateString(errorString);
+    return NULL;
 }
 
-cJSON* opcua_client_update_subscriptions(cJSON* request){
-    char *errorString;
-    cJSON* response = NULL;
-
+cJSON* opcua_client_update_subscriptions(cJSON* args, char **error){
     if (get_connection_state( opcua_client ) != UA_STATUSCODE_GOOD){
-        errorString = "connection error";
-        goto error;
+        *error = "connection error";
+        goto on_error;
     };
 
     if (UA_Client_run_iterate(opcua_client, 10) != UA_STATUSCODE_GOOD){
-        errorString = "unable update subscriptions";
-        goto error;
+        *error = "unable update subscriptions";
+        goto on_error;
     }
 
-    response = cJSON_CreateString("ok");
-    if (response == NULL){
-        errorString = "unable to allocate response";
-        goto error;
-    }
-
-    return on_ok( response );
-error:
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_read";
-    }
-    return on_error( errorString );
+    return cJSON_CreateString("ok");
+on_error:
+    return NULL;
 }
 
 UA_StatusCode get_connection_state( UA_Client *client ){
@@ -564,73 +564,87 @@ UA_StatusCode get_connection_state( UA_Client *client ){
     return UA_Client_readDataTypeAttribute(client, nodeId, &dataType);
 }
 
-cJSON* opcua_client_browse_endpoints(cJSON* request){
+cJSON* opcua_client_browse_endpoints(cJSON* args, char **error){
     UA_Client *client = NULL;
     cJSON *response = NULL;
+    cJSON *host = NULL;
+    cJSON *port = NULL;
     cJSON *endpoint = NULL;
-    char *errorString = NULL;
     char *connectionString = NULL;
+
+    if ( !cJSON_IsObject(args) ) {
+        *error = "invalid parameters";
+        goto on_error;
+    }
+
+    host = cJSON_GetObjectItemCaseSensitive(args, "host");
+    if (!cJSON_IsString(host) || (host->valuestring == NULL)){
+        *error = "host is not defined";
+        goto on_error; 
+    }
+
+    port = cJSON_GetObjectItemCaseSensitive(args, "port");
+    if (!cJSON_IsNumber(port)){
+        *error = "port is not defined";
+        goto on_error; 
+    }
 
     UA_EndpointDescription* endpointArray = NULL;
     size_t endpointArraySize = 0;
     UA_StatusCode retval;
-
-    // Connection params
-    cJSON *host = cJSON_GetObjectItemCaseSensitive(request, "host");
-    cJSON *port = cJSON_GetObjectItemCaseSensitive(request, "port");
 
     // Build the connection string (6 in tail is :<port> as port max string length is 5)
     char *prefix = "opc.tcp://";
     int urlLen = strlen(prefix) + strlen(host->valuestring) + 6; // :65535 is max
     connectionString = malloc( urlLen );
     if (connectionString == NULL){
-        errorString = "unable to allocate connectionString";
-        goto error;
+        *error = "unable to allocate connectionString";
+        goto on_error;
     }
     sprintf(connectionString, "%s%s:%d", prefix, host->valuestring, (int)port->valuedouble);
-    LOGDEBUG("DEBUG: connectionString %s\r\n",connectionString);
+    LOGDEBUG("connectionString %s",connectionString);
 
     // Create a connection
     client = UA_Client_new();
     if (client == NULL){
-        LOGERROR("ERROR: unable to allocate the client\r\n");
-        goto error;
+        *error = "unable to allocate the client";
+        goto on_error;
     }
     UA_ClientConfig_setDefault(UA_Client_getConfig(client));
 
     // Request endpoints
     retval = UA_Client_getEndpoints(client, connectionString, &endpointArraySize, &endpointArray);
     if(retval != UA_STATUSCODE_GOOD) {
-        errorString = "connection error";
-        goto error;
+        *error = "connection error";
+        goto on_error;
     }
-    UA_Client_delete(client);
-    LOGDEBUG("DEBUG: %i endpoints found\r\n",(int)endpointArraySize);
+    UA_Client_delete(client); client = NULL;
+    LOGDEBUG("%i endpoints found\r\n",(int)endpointArraySize);
 
     // Build the response
     response = cJSON_CreateArray();
     if(response == NULL){
-        errorString = "unable to allocate CJSON object for response";
-        goto error;
+        *error = "unable to allocate CJSON object for response";
+        goto on_error;
     }
     for(size_t i=0; i<endpointArraySize; i++) {
         endpoint = cJSON_CreateString( (char *)endpointArray[i].server.discoveryUrls->data );
         if (endpoint == NULL){
-            errorString = "unable to allocate CJSON object for endpoint";
-            goto error;
+            *error = "unable to allocate CJSON object for endpoint";
+            goto on_error;
         }
         if (!cJSON_AddItemToArray(response,endpoint)){
-            errorString = "unable to add endpoint to the array";
-            goto error;
+            *error = "unable to add endpoint to the array";
+            goto on_error;
         }
     }
 
     free(connectionString);
     UA_Array_delete(endpointArray,endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
 
-    return on_ok( response );
+    return response;
 
-error:
+on_error:
     if (connectionString != NULL){
         free(connectionString);
     }
@@ -642,45 +656,36 @@ error:
     }
     cJSON_Delete( endpoint );
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_browse_endpoints";
-    }
-    return on_error( errorString );
+    return NULL;
 }
 
-cJSON* opcua_client_browse_folder(cJSON* request){
+cJSON* opcua_client_browse_folder(cJSON* args, char **error){
     cJSON *response = NULL;
-    char *errorString = NULL;
+
+    if ( !cJSON_IsArray(args) ) {
+        *error = "invalid folder parameter";
+        goto on_error;
+    }
 
     UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-    int ret = path2nodeId( request, &nodeId );
+    int ret = path2nodeId( args, &nodeId );
     if (ret != 0){
-        errorString = "invalid node path";
-        goto error;
+        *error = "invalid node path";
+        goto on_error;
     }
 
-    response = browse_folder( nodeId );
-    if(response == NULL){
-        errorString = "invalid folder";
-        goto error;
-    }
+    return browse_folder( nodeId, error );
 
-    return on_ok( response );
-
-error:
+on_error:
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_client_browse_endpoints";
-    }
-    return on_error( errorString );
+    return NULL;
 }
 
-cJSON* browse_folder( UA_NodeId folder ){
+cJSON* browse_folder( UA_NodeId folder, char **error ){
     cJSON *result = NULL;
     cJSON *subitem = NULL;
     UA_String nodeId;
 
-    LOGDEBUG("DEBUG:-----------------browse folder-------------------------\r\n");
     // Build the request
     UA_BrowseRequest request;
     UA_BrowseRequest_init(&request);
@@ -693,8 +698,8 @@ cJSON* browse_folder( UA_NodeId folder ){
     // Execute the request
     UA_BrowseResponse response = UA_Client_Service_browse(opcua_client, request);
     if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        LOGERROR("ERROR: UA_Client_Service_browse error\r\n");
-        goto error;
+        *error = "UA_Client_Service_browse error";
+        goto on_error;
     }
 
     // Build the result
@@ -706,34 +711,32 @@ cJSON* browse_folder( UA_NodeId folder ){
 
             // Convert the nodeId to string
             if (UA_NodeId_print(&ref->nodeId.nodeId, &nodeId) != UA_STATUSCODE_GOOD){
-                LOGERROR("ERROR: unable to serialize nodeId in browse_folder\r\n");
-                goto error; 
+                *error = "unable to serialize nodeId in browse_folder";
+                goto on_error; 
             }
-
-            LOGDEBUG("DEBUG: node %s ref->nodeClass %d\r\n",(char *)ref->displayName.text.data,ref->nodeClass);
 
             subitem = cJSON_CreateObject();
             if(subitem == NULL){
-                LOGERROR("ERROR: unable to allocate subitem\r\n");
-                goto error;
+                *error = "unable to allocate subitem";
+                goto on_error;
             }
             
             if (cJSON_AddStringToObject(subitem,"id", (char *)nodeId.data) == NULL) {
-                LOGERROR("ERROR: unable to add a nodeId the result in browse_folder\r\n");
+                *error = "unable to add a nodeId the result in browse_folder";
                 UA_String_clear(&nodeId);
-                goto error; 
+                goto on_error; 
             }
 
             if (cJSON_AddNumberToObject(subitem,"type", ref->nodeClass) == NULL) {
-                LOGERROR("ERROR: unable to add a type the result in browse_folder\r\n");
+                *error = "unable to add a type the result in browse_folder";
                 UA_String_clear(&nodeId);
-                goto error; 
+                goto on_error; 
             }
 
             if (!cJSON_AddItemToObject(result, (char *)ref->displayName.text.data, subitem)) {
-                LOGERROR("ERROR: unable to add a node the result in browse_folder\r\n");
+                *error = "unable to add a node the result in browse_folder";
                 UA_String_clear(&nodeId);
-                goto error; 
+                goto on_error; 
             }
 
             UA_String_clear(&nodeId);
@@ -744,7 +747,7 @@ cJSON* browse_folder( UA_NodeId folder ){
 
     return result;
 
-error:
+on_error:
     cJSON_Delete( subitem );
     cJSON_Delete( result );
     UA_BrowseRequest_clear(&request);
@@ -759,37 +762,38 @@ int path2nodeId( cJSON *path, UA_NodeId *node ){
     cJSON *level = NULL;
     cJSON *content = NULL;
     cJSON *next = NULL;
+    char **error = NULL;
 
     // Start from the Objects folder
     cJSON_ArrayForEach(level, path) {
-        content = browse_folder( *node );
+        content = browse_folder( *node, error );
         if (content == NULL){
-            LOGERROR("ERROR: path2nodeId unable to browse folder\r\n");
-            goto error;
+            LOGERROR("path2nodeId unable to browse folder");
+            goto on_error;
         }
 
         // Lookup node by name
         next = cJSON_GetObjectItemCaseSensitive(content, level->valuestring );
         if (!cJSON_IsObject(next)){
-            LOGERROR("ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
-            goto error;
+            LOGERROR("path2nodeId invalid level %s",level->valuestring);
+            goto on_error;
         }
         next = cJSON_GetObjectItemCaseSensitive(next, "id" );
         if (!cJSON_IsString(next) || (next->valuestring == NULL)){
-            LOGERROR("ERROR: path2nodeId invalid level %s\r\n",level->valuestring);
-            goto error;
+            LOGERROR("path2nodeId invalid level %s",level->valuestring);
+            goto on_error;
         }
 
         if (UA_NodeId_parse(node, UA_STRING((char*)(uintptr_t)next->valuestring)) != UA_STATUSCODE_GOOD){
-            LOGERROR("ERROR: path2nodeId unable to parse nodeId %s\r\n",next->valuestring);
-            goto error;
+            LOGERROR("path2nodeId unable to parse nodeId %s",next->valuestring);
+            goto on_error;
         }
         cJSON_Delete( content );
     }
 
     return 0;
 
-error:
+on_error:
     cJSON_Delete( content );
     return -1;
 }
@@ -807,7 +811,7 @@ char* path2string( cJSON *path ){
     // Allocate the string
     result = malloc( length );
     if (result == NULL){
-        LOGERROR("ERROR: unable to allocate the memory for path string\r\n");
+        LOGERROR("unable to allocate the memory for path string");
         goto error;
     }
 
@@ -819,7 +823,7 @@ char* path2string( cJSON *path ){
         strcat(result, level->valuestring);
     }
 
-    LOGDEBUG("DEBUG: path2string %s\r\n", result);
+    LOGDEBUG("path2string %s", result);
 
     return result;
 
@@ -958,15 +962,15 @@ int init_subscriptions(){
  
     subscriptionId = response.subscriptionId;
     if(response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        LOGERROR("ERROR: unable to create a subscription request\r\n");
+        LOGERROR("unable to create a subscription request");
         goto error;
     }
-    LOGDEBUG("DEBUG: Create subscription succeeded, id %u\r\n", subscriptionId);
+    LOGDEBUG("Create subscription succeeded, id %u", subscriptionId);
  
    return 0;
 error:
     if(UA_Client_Subscriptions_deleteSingle(opcua_client, subscriptionId) == UA_STATUSCODE_GOOD){
-        LOGERROR("ERROR: unable to purge the subscription request\r\n");
+        LOGERROR("unable to purge the subscription request");
     }
     return -1;
 }
@@ -979,9 +983,9 @@ static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *sub
     HASH_FIND_INT(opcua_client_subscriptions, &monId, s);
     if (s != NULL){
         // Update the value
-        LOGDEBUG("DEBUG: update subscription %d\r\n",monId);
+        LOGTRACE("update subscription %d",monId);
         if (UA_Variant_copy( &value->value, s->value ) != UA_STATUSCODE_GOOD){
-            LOGERROR("ERROR: unable to copy value on subscription update\r\n");
+            LOGERROR("unable to copy value on subscription update");
         }
     }
 }
@@ -999,7 +1003,7 @@ UA_ByteString* loadFile(const char* path){
 	UA_ByteString_allocBuffer(result, (size_t)fsize + 1);
 	memset(result->data, 0, result->length);
 	if (fread(result->data, result->length, 1, f) == 0){
-	    LOGDEBUG("DEBUG: empty file");
+	    LOGDEBUG("empty file");
 	}
 	fclose(f);
 
@@ -1009,12 +1013,12 @@ UA_ByteString* loadFile(const char* path){
 UA_ByteString* parse_base64(char* base64string){
     UA_ByteString *result = UA_ByteString_new();
 
-    LOGDEBUG("DEBUG: allocate UA_String for base64\r\n");
+    LOGDEBUG("allocate UA_String for base64");
     UA_String b64 = UA_STRING_ALLOC( base64string );
 
-    LOGDEBUG("DEBUG: parse base64 from UA_String\r\n");
+    LOGDEBUG("parse base64 from UA_String");
     if ( UA_ByteString_fromBase64( result, &b64 ) != UA_STATUSCODE_GOOD){
-        LOGERROR("ERROR: unable to parse base64 string\r\n");
+        LOGERROR("unable to parse base64 string");
         goto error;
     };
     UA_String_clear( &b64 );
@@ -1037,30 +1041,30 @@ char* parse_certificate_uri( const unsigned char *certificate, size_t len ){
     // Parse the certificate
     cert = d2i_X509(NULL, &certificate, len);
     if (!cert) {
-        LOGERROR("ERROR: unable to parse certificate in memory\r\n");
+        LOGERROR("unable to parse certificate in memory");
         goto error;
     }
 
     // Extract the subjectAltName extension
     int index = X509_get_ext_by_NID( cert, NID_subject_alt_name, -1);
     if (index < 0 ){
-        LOGERROR("ERROR: the certificate doesn't have the subjectAltName extension\r\n");
+        LOGERROR("the certificate doesn't have the subjectAltName extension");
         goto error;
     }
     ex = X509_get_ext(cert, index);
     if (ex == NULL){
-        LOGERROR("ERROR: unable to extract subjectAltName extension\r\n");
+        LOGERROR("unable to extract subjectAltName extension");
         goto error;
     }
 
     // get the extension value
     ext_bio = BIO_new(BIO_s_mem());
     if (ext_bio == NULL){
-        LOGERROR("ERROR: unable to allocate memory for extension value BIO\r\n");
+        LOGERROR("unable to allocate memory for extension value BIO");
         goto error;
     }
     if(!X509V3_EXT_print(ext_bio, ex, 0, 0)){
-        LOGERROR("ERROR: unable to allocate memory for extension value BIO\r\n");
+        LOGERROR("unable to allocate memory for extension value BIO");
         goto error;
     }
     BIO_flush(ext_bio);
@@ -1084,20 +1088,20 @@ char* parse_certificate_uri( const unsigned char *certificate, size_t len ){
     }
 
     if (URIStart == -1 || URIStop == -1 || URIStart >= URIStop ){
-        LOGERROR("ERROR: subjectAltName doesn'r contain URI\r\n");
+        LOGERROR("subjectAltName doesn'r contain URI");
         goto error;
     }
 
     // copy URI
     URI = malloc( URIStop - URIStart + 1 );
     if (URI == NULL){
-        LOGERROR("ERROR: unable to allocate memory for URI\r\n");
+        LOGERROR("unable to allocate memory for URI");
         goto error;
     }
     memcpy(URI, &bptr->data[URIStart], URIStop - URIStart);
     URI[URIStop] = '\0';
 
-    LOGDEBUG("DEBUG: subjectAltName %s\r\n", URI);
+    LOGDEBUG("subjectAltName %s", URI);
 
     BIO_free(ext_bio);
     X509_free(cert);
@@ -1122,14 +1126,15 @@ int main(int argc, char *argv[]) {
     // Create the client object
     opcua_client = UA_Client_new();
     if (opcua_client == NULL){
-        LOGERROR("ERROR: unable to allocate the connection object\r\n");
+        LOGERROR("unable to allocate the connection object");
         exit(EXIT_FAILURE);
     }
 
     OpenSSL_add_all_algorithms();
     ERR_load_BIO_strings();
 
-    LOGDEBUG("DEBUG: enter eport_loop\r\n");
+    SETLOGLEVEL(0);
+    LOGINFO("enter eport_loop");
     eport_loop( &on_request );
 
     return EXIT_SUCCESS;
