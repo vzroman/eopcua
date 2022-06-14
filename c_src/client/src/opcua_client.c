@@ -37,8 +37,7 @@
 #include <openssl/bio.h>
 //----------------------------------------
 #include "opcua_client.h"
-  
-LOGLEVEL(EPORT_C_LOGLEVEL_INFO);  
+   
 cJSON* on_request(char* method, cJSON *args, char **error);
 
 cJSON* opcua_client_connect(cJSON* args, char **error);
