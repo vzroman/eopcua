@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <try_catch.h>
 #include "eport.h"
 
 int read_exact(byte *buf, int len);
@@ -32,6 +33,8 @@ void eport_loop(eport_request_handler callback){
     byte *request;
     byte *response;
     int len = 0;
+    cJSON *requestJSON = NULL;
+    cJSON *responseJSON = NULL;
 
     //-----------the loop--------------------------
     while ( 1 ){
@@ -43,13 +46,42 @@ void eport_loop(eport_request_handler callback){
             if (request != NULL){
                 free(request);
             }
-            fprintf(stdout,"EXIT port\r\n");
-            exit(EXIT_FAILURE);
+            break;
         }
 
-        // Handle the request with the callback
-        LOGDEBUG("DEBUG: message received: %s\r\n",(char *)request);
-        response = (byte *)callback( (char *)request );
+        LOGTRACE("DEBUG: message received: %s\r\n",(char *)request);
+
+        char *error = NULL;
+        TRY(
+            // parse JSON
+            requestJSON = parse_request( request, &error );
+
+            // Handle the request with the callback
+            responseJSON = callback( requestJSON, &error );
+
+        )CATCH( exception,
+            LOGERROR("undefined exception %d", exception);
+        );
+
+        if (responseJSON != NULL){
+                
+        }else{
+            // there must be some error
+            if (error == NULL){
+                responseJSON = on_error( requestJSON, "undefined error" );
+            }else{
+                responseJSON = on_error( requestJSON, error );
+            }
+        }
+
+        cJSON_Delete( requestJSON ); requestJSON = NULL;
+        cJSON_Delete( responseJSON ); responseJSON = NULL;
+        free( request );
+        free( response );
+        if (error != NULL){
+            free( error );
+        }
+
         // request is not needed any longer, free its memory
         free(request);
 
@@ -63,7 +95,7 @@ void eport_loop(eport_request_handler callback){
         free( response );
     }
 
-    exit(EXIT_FAILURE);
+    LOGDEBUG("EXIT port");
 }
 
 //----------Read/Write helpers----------------------------------------
@@ -103,7 +135,6 @@ int read_cmd(byte **buf) {
     for (i = 0; i < HEADER_LENGTH; i++){
         len = len | (lbuf[i] << (8 * (HEADER_LENGTH - i -1)) );
     }
-    LOGDEBUG("DEBUG: received length: %d\r\n",len);
 
     // Step 2. Read the message itself
     *buf = malloc(len); // dynamically allocate the memory for the message
@@ -125,4 +156,79 @@ int write_cmd(byte *buf, int len){
     // Send the response
     write_exact(lbuf, HEADER_LENGTH);
     return write_exact(buf, len);
+}
+
+cJSON * parse_request( const char *request, char *error ){
+
+    // Parse the request to JSON structure
+    const cJSON *request = cJSON_Parse( message );
+    if (JSON == NULL){
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL) {
+            RAISE("ERROR: invalid JSON before: %s\r\n", error_ptr);
+        }else{
+            LOGERROR("ERROR: invalid JSON\r\n");
+        }
+        goto error;
+    }
+
+    // Parse the type of the request
+    LOGDEBUG("DEBUG: parse cmd\r\n");
+    cmd = cJSON_GetObjectItemCaseSensitive(JSON, "cmd");
+    if (cJSON_IsString(cmd) && (cmd->valuestring != NULL)){
+        request->cmd = string2cmd( cmd->valuestring );
+        if (request->cmd == -1){
+            LOGERROR("ERROR: invalid command type: %s\r\n", cmd->valuestring);
+            goto error;
+        }
+    } else {
+        LOGERROR("ERROR: command type is not defined\r\n");
+        goto error;
+    }
+
+    // Parse transaction ID
+    LOGDEBUG("DEBUG: parse tid\r\n");
+    tid = cJSON_GetObjectItemCaseSensitive(JSON, "tid");
+    if ( cJSON_IsNumber(tid)) {
+        request->tid = tid->valuedouble;
+    } else{
+        LOGERROR("ERROR: transaction id not defined\r\n");
+        goto error;
+    }
+    
+    // Parse body
+    LOGDEBUG("DEBUG: parse body\r\n");
+    request->body = cJSON_DetachItemFromObject(JSON, "body");
+
+    if (request->cmd == OPCUA_CLIENT_CONNECT){
+        if (parse_connect_request( request->body ) != 0){ goto error; }
+    } else if( request->cmd == OPCUA_CLIENT_READ ){
+        if (parse_read_request( request->body ) != 0) { goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_WRITE ){
+        if (parse_write_request( request->body ) != 0){ goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_SUBSCRIBE ){
+        if (parse_subscribe_request( request->body ) != 0){ goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS ){
+        if (parse_update_subscriptions_request( request->body ) != 0){ goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_BROWSE_ENDPOINTS ){
+        if (parse_browse_endpoints_request( request->body ) != 0){ goto error; }
+    }else if( request->cmd == OPCUA_CLIENT_BROWSE_FOLDER ){
+        if (parse_browse_folder_request( request->body ) != 0){ goto error; }
+    } else {
+        LOGERROR("ERROR: invalid command type %d\r\n",request->cmd);
+        goto error;
+    }
+    if (request->body == NULL){
+        LOGERROR("ERROR: unable to parse request body\r\n");
+        goto error;
+    }
+
+    cJSON_Delete( JSON );
+
+    return 0;
+
+error:
+
+    cJSON_Delete( JSON );
+    return -1;
 }

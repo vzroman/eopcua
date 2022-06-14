@@ -21,8 +21,9 @@ CJSON_LIB_DIR ?= $(CURDIR)/cJSON/build/_install/lib
 UTHASH_INCLUDE_DIR ?= $(CURDIR)/uthash/include
 
 EPORT_INCLUDE_DIR ?= $(CURDIR)/eport/include
+UTILITIES_INCLUDE_DIR ?= $(CURDIR)/utilities/include
 
-INCLUDE_DIR = -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(UTHASH_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR)
+INCLUDE_DIR = -I $(ERL_INTERFACE_INCLUDE_DIR) -I $(OPEN62541_INCLUDE_DIR) -I $(CJSON_INCLUDE_DIR) -I $(UTHASH_INCLUDE_DIR) -I $(EPORT_INCLUDE_DIR) -I $(UTILITIES_INCLUDE_DIR)
 CLIENT_INCLUDE_DIR ?= -I $(CURDIR)/client/include
 SERVER_INCLUDE_DIR ?= -I $(CURDIR)/server/include
 
@@ -35,16 +36,16 @@ C_SRC_OUTPUT_SERVER ?= $(CURDIR)/../priv/$(PROJECT)_server
 UNAME_SYS := $(shell uname -s)
 ifeq ($(UNAME_SYS), Darwin)
 	CC ?= cc
-	CFLAGS ?= -O3 -std=c99 -arch x86_64 -finline-functions -Wall -Wmissing-prototypes
+	CFLAGS ?= -O3 -arch x86_64 -finline-functions -Wall -Wmissing-prototypes
 	CXXFLAGS ?= -O3 -arch x86_64 -finline-functions -Wall
 	LDFLAGS ?= -arch x86_64 -flat_namespace -undefined suppress
 else ifeq ($(UNAME_SYS), FreeBSD)
 	CC ?= cc
-	CFLAGS ?= -O3 -std=c99 -finline-functions -Wall -Wmissing-prototypes
+	CFLAGS ?= -O3 -finline-functions -Wall -Wmissing-prototypes
 	CXXFLAGS ?= -O3 -finline-functions -Wall
 else ifeq ($(UNAME_SYS), Linux)
 	CC ?= gcc
-	CFLAGS ?= -O3 -std=c99 -finline-functions -Wall -Wmissing-prototypes
+	CFLAGS ?= -O3 -finline-functions -Wall -Wmissing-prototypes
 	CXXFLAGS ?= -O3 -finline-functions -Wall
 endif
 

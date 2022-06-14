@@ -17,6 +17,7 @@
 ----------------------------------------------------------------*/
 
 #include <cjson/cJSON.h>
+#include <try_catch.h>
 
 // The header of the request that defines the total lengsth of the message
 #define HEADER_LENGTH 4
@@ -45,7 +46,7 @@
 typedef unsigned char byte;
 
 // Callback type 
-typedef char* (*eport_request_handler) (char *);
+typedef cJSON* (*eport_request_handler) (cJSON *, char *);
 
 // The loop definition
 void eport_loop( eport_request_handler callback );
