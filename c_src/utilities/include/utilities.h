@@ -15,9 +15,23 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
+#include <open62541/types.h>
+#include <open62541/types_generated.h>
+#include <open62541/types_generated_handling.h>
+#include <open62541/util.h>
+//----------------------------------------
+#include <cjson/cJSON.h>
+
 #ifndef eopcua_utilities__h
 #define eopcua_utilities__h
 
 char** str_split(char* a_str, const char a_delim);
+void str_split_destroy(char** tokens);
+
+UA_ByteString* parse_base64(char* base64string);
+char* parse_certificate_uri(UA_ByteString *certificate, char **error);
+
+cJSON* ua2json( const UA_DataType *type, void *value );
+UA_Variant *json2ua(const UA_DataType *type, cJSON *value);
 
 #endif

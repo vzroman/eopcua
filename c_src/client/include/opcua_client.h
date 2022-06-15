@@ -16,6 +16,7 @@
 * under the License.
 ----------------------------------------------------------------*/
 #include <uthash.h>
+#include <open62541/types.h>
 
 typedef struct {
   char *path;
@@ -26,5 +27,6 @@ typedef struct {
 typedef struct {
   int id;
   UA_Variant *value;
+  UA_NodeId nodeId;
   UT_hash_handle hh;
 } opcua_client_subscription;
