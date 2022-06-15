@@ -21,6 +21,8 @@
 #include <string.h>
 #include <pthread.h>
 //----------------------------------------
+#include <eport_c.h>
+//----------------------------------------
 #include <open62541/plugin/log_stdout.h>
 #include <open62541/server.h>
 #include <open62541/server_config_default.h>
@@ -33,96 +35,52 @@
 #include <openssl/pem.h>
 #include <openssl/bio.h>
 //----------------------------------------
-#include "opcua_server.h"
-#include "opcua_server_protocol.h"
-
-//-----------helpers----------------------
-cJSON* on_error(char* text);
-cJSON* on_ok(cJSON* response);
+#include "utilities.h"
 
 //-----------command handlers-------------
-cJSON* opcua_server_start(cJSON* request);
-cJSON* opcua_server_add_nodes(cJSON* request);
+cJSON* on_request( char *method, cJSON *args, char **error );
+
+cJSON* opcua_server_start(cJSON* args, char **error);
+cJSON* opcua_server_add_nodes(cJSON* args, char **error);
+cJSON *add_node(cJSON* args, char **error);
 
 //---------server thread entry point------
-static void *startServer(void* arg);
-char *add_node(cJSON* node);
+static void *server_thread(void* arg);
 
 //------------utilities-----------------------
 char** str_split(char* a_str, const char a_delim);
+
+//------------test-----------------------
+void testStartServer();
 
 // The RUN flag
 static volatile UA_Boolean running = true;
 UA_Server *server = NULL;
 
 //-------------------The command loop-------------------------------------
-char* on_request( char *requestString ){
-    cJSON *response;
-    char *responseString;
-    OPCUA_SERVER_REQUEST request = {};
-
-    // Parse the request
-    LOGDEBUG("DEBUG: parsing the request\r\n");
-    if (parse_request( requestString, &request ) != 0){
-        response = on_error("invalid request");
-    }else{
-        // Handle the request
-        LOGDEBUG("DEBUG: handle the request\r\n");
-        if( request.cmd == OPCUA_SERVER_START ){
-            response = opcua_server_start( request.body );
-        } else{
-            response = on_error("unsupported command type");
-        }
+cJSON* on_request( char *method, cJSON *args, char **error ){
+    
+    cJSON *response = NULL;
+    // Handle the request
+    LOGDEBUG("handle the request %s", method);
+    if( strcmp(method, "start") == 0){
+        response = opcua_server_start( args, error );
+    } else{
+        *error = "invalid method";
     }
 
-    // Reply (purges the response)
-    responseString = create_response( &request, response );
-
-    purge_request( &request );
-    LOGDEBUG("DEBUG: response %s\r\n",responseString);
-
-    return responseString;
-}
-
-//-------------------helpers-------------------------------------
-cJSON* on_error(char* text){
-    cJSON *response = cJSON_CreateObject();
-    if (cJSON_AddStringToObject(response, "type", "error") == NULL) {
-        goto error;
-    }
-    if (cJSON_AddStringToObject(response, "text", text) == NULL) {
-        goto error;
-    }
     return response;
-
-error:
-    cJSON_Delete( response );
-    return NULL;
-}
-
-cJSON* on_ok(cJSON *result){
-    cJSON *response = cJSON_CreateObject();
-    if ( cJSON_AddStringToObject(response, "type", "ok") == NULL) {
-        goto error;
-    }
-    if ( !cJSON_AddItemToObject(response, "result", result) ) {
-        goto error;
-    }
-    return response;
-
-error:
-    cJSON_Delete( response );
-    return NULL;
 }
 
 //--------------------command handlers----------------------------------
-cJSON* opcua_server_start(cJSON* request){
+cJSON* opcua_server_start(cJSON* args, char **error){
     cJSON *response = NULL;
-    char *errorString = NULL;
+
+    LOGINFO("launching a server thread");
 
     if (server != NULL){
-        errorString = "server is already run";
-        goto error;
+        *error = "server is already run";
+        goto on_error;
     }
 
     // Create a new server instance
@@ -135,70 +93,38 @@ cJSON* opcua_server_start(cJSON* request){
     UA_ServerConfig_setDefault(UA_Server_getConfig(server));
 
     // Launch the server thread
-    int res = pthread_create( &serverThread, NULL, &startServer, server);
+    int res = pthread_create( &serverThread, NULL, &server_thread, server);
 
     if (res !=0 ){
-        errorString = "unable to launch the server thread";
-        goto error;
+        *error = "unable to launch the server thread";
+        goto on_error;
     }
 
     // the server has started
-    response = cJSON_CreateString("ok");
-    return on_ok( response );
+    return cJSON_CreateString("ok");
 
-error:
+on_error:
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_server_start";
-    }
-    return on_error( errorString );
+    return NULL;
 
 }
 
-//---------------The server thread-------------------------------------------
-static void *startServer(void *arg) {
-    UA_Server * server = arg;
-    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "starting the server");
 
-    UA_StatusCode retval = UA_Server_run(server, &running);
-
-    UA_Server_delete(server);
-
-    char *status = (char *)UA_StatusCode_name( retval );
-    if (retval != UA_STATUSCODE_GOOD){
-        UA_LOG_ERROR(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "unable to start server, status %s", status);
-    }
-
-    // Set the flag to the ready state
-    running = true;
-    server = NULL;
-
-    return status;
-}
-
-cJSON* opcua_server_add_nodes(cJSON* request) {
+cJSON* opcua_server_add_nodes(cJSON* args, char **error) {
     cJSON *response = NULL;
-    char *errorString = NULL;
 
-    return on_ok(response);
-error:
+    return response;
+on_error:
     cJSON_Delete( response );
-    if (errorString == NULL){
-        errorString = "programming error in opcua_server_start";
-    }
-    return on_error( errorString );
+    return NULL;
 }
 
-char *add_node(cJSON* node){
-    char * result;
+cJSON *add_node(cJSON* args, char **error){
 
-    cJSON *path = cJSON_GetObjectItemCaseSensitive(node, "path");
-    cJSON *name = cJSON_GetObjectItemCaseSensitive(node, "name");
-    cJSON *type = cJSON_GetObjectItemCaseSensitive(node, "type");
-    cJSON *nodeId = cJSON_GetObjectItemCaseSensitive(node, "nodeId");
+    cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(args, "type");
 
-
-    /* Define the attribute of the myInteger variable node */
+    /* Define the attrsibute of the myInteger variable node */
     UA_VariableAttributes attr = UA_VariableAttributes_default;
     UA_Int32 myInteger = 42;
     UA_Variant_setScalar(&attr.value, &myInteger, &UA_TYPES[UA_TYPES_INT32]);
@@ -216,62 +142,37 @@ char *add_node(cJSON* node){
                               parentReferenceNodeId, myIntegerName,
                               UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE), attr, NULL, NULL);
     
-    return result;
+    return cJSON_CreateString("ok");
 
 // error:
 //     return result;
 }
 
-char** str_split(char* a_str, const char a_delim){
-    char** result    = 0;
-    size_t count     = 0;
-    char* tmp        = a_str;
-    char* last_comma = 0;
-    char delim[2];
-    delim[0] = a_delim;
-    delim[1] = 0;
+//---------------The server thread-------------------------------------------
+static void *server_thread(void *arg) {
+    UA_Server * server = arg;
+    LOGINFO("starting the server");
 
-    /* Count how many elements will be extracted. */
-    while (*tmp)
-    {
-        if (a_delim == *tmp)
-        {
-            count++;
-            last_comma = tmp;
-        }
-        tmp++;
+    // The returns only when the server shuts down
+    UA_StatusCode retval = UA_Server_run(server, &running);
+
+    UA_Server_delete(server);
+
+    char *status = (char *)UA_StatusCode_name( retval );
+    if (retval != UA_STATUSCODE_GOOD){
+        LOGERROR("unable to start server, status %s", status);
     }
 
-    /* Add space for trailing token. */
-    count += last_comma < (a_str + strlen(a_str) - 1);
+    // Set the flag to the ready state
+    running = true;
+    server = NULL;
 
-    /* Add space for terminating null string so caller
-       knows where the list of returned strings ends. */
-    count++;
-
-    result = malloc(sizeof(char*) * count);
-
-    if (result)
-    {
-        size_t idx  = 0;
-        char* token = strtok(a_str, delim);
-
-        while (token)
-        {
-            assert(idx < count);
-            *(result + idx++) = strdup(token);
-            token = strtok(0, delim);
-        }
-        assert(idx == count - 1);
-        *(result + idx) = 0;
-    }
-
-    return result;
+    return status;
 }
 
 //------------------------catch signals------------------------------------------------
 static void stopHandler(int sig) {
-    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "received ctrl-c");
+    LOGINFO("received ctrl-c");
     running = false;
 }
 
@@ -284,39 +185,18 @@ int main(int argc, char *argv[]) {
     OpenSSL_add_all_algorithms();
     ERR_load_BIO_strings();
 
-    // UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,"enter eport_loop");
-    // eport_loop( &on_request );
+    SETLOGLEVEL(0);
 
-    testStringSplit();
-    
-    
+    // LOGINFO("enter eport_loop");
+    // eport_loop( &on_request );
+    testStartServer();
+
+    sleep(10);
     return EXIT_SUCCESS;
 }
 
 void testStartServer(){
-    UA_Server *server = UA_Server_new();
-    UA_ServerConfig_setDefault(UA_Server_getConfig(server));
-    startServer( server );
-}
-
-void testStringSplit(){
-    char sample[] = "TAGS/my folder/my_tag";
-    char** tokens;
-
-    printf("sample=[%s]\n\n", sample);
-
-    tokens = str_split(sample, '/');
-
-    if (tokens)
-    {
-        int i;
-        for (i = 0; *(tokens + i); i++)
-        {
-            printf("s=[%s]\n", *(tokens + i));
-            free(*(tokens + i));
-        }
-        printf("\n");
-        free(tokens);
-    }
-
+    char **error = NULL;
+    cJSON *args = NULL; 
+    opcua_server_start(args, error);
 }

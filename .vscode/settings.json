@@ -4,7 +4,8 @@
         "*.tcc": "c",
         "cstdlib": "c",
         "memory": "c",
-        "eport_c.h": "c"
+        "eport_c.h": "c",
+        "utilities.h": "c"
     },
     "erlang.includePaths":[
         "include"

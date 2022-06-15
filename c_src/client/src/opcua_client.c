@@ -77,7 +77,7 @@ cJSON* on_request( char *method, cJSON *args, char **error ){
     
     cJSON *response = NULL;
     // Handle the request
-    LOGDEBUG("handle the request");
+    LOGDEBUG("handle the request %s", method);
     if( strcmp(method, "connect") == 0){
         response = opcua_client_connect( args, error );
     } else if (strcmp(method, "read") == 0){
