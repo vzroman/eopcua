@@ -34,6 +34,13 @@
 bool uaIsNumber( const UA_DataType *type );
 
 char** str_split(char* a_str, const char a_delim){
+
+    // Check id the string is empty
+    if (strlen(a_str) == 0){
+        return NULL;
+    }
+
+    a_str = strdup(a_str);
     char** result    = 0;
     size_t count     = 0;
     char* tmp        = a_str;
@@ -77,6 +84,7 @@ char** str_split(char* a_str, const char a_delim){
         *(result + idx) = 0;
     }
 
+    free(a_str);
     return result;
 }
 
@@ -87,6 +95,42 @@ void str_split_destroy(char** tokens){
         }
         free(tokens);
     }
+}
+
+char* str_replace(const char* source, const char* search, const char* replace){
+    char* result;
+    int i, cnt = 0;
+    int replaceLength = strlen(replace);
+    int searchLength = strlen(search);
+  
+    // Counting the number of times old word
+    // occur in the string
+    for (i = 0; source[i] != '\0'; i++) {
+        if (strstr(&source[i], search) == &source[i]) {
+            cnt++;
+  
+            // Jumping to index after the old word.
+            i += searchLength - 1;
+        }
+    }
+  
+    // Making new string of enough length
+    result = (char*)malloc(i + cnt * (replaceLength - searchLength) + 1);
+  
+    i = 0;
+    while (*source) {
+        // compare the substring with the result
+        if (strstr(source, search) == source) {
+            strcpy(&result[i], replace);
+            i += replaceLength;
+            source += searchLength;
+        }
+        else
+            result[i++] = *source++;
+    }
+  
+    result[i] = '\0';
+    return result;
 }
 
 UA_ByteString* parse_base64(char* base64string){
@@ -211,19 +255,66 @@ cJSON* ua2json( const UA_DataType *type, void *value ){
 UA_Variant *json2ua(const UA_DataType *type, cJSON *value){
 
     UA_Variant *result = UA_Variant_new();
+    bool isNumber = cJSON_IsBool(value) || cJSON_IsNumber(value);
 
-    if (uaIsNumber( type ) && (cJSON_IsBool(value) || cJSON_IsNumber(value))){
-        if ( UA_Variant_setScalarCopy( result, &value->valuedouble, type) == UA_STATUSCODE_GOOD){
+    if (type == &UA_TYPES[UA_TYPES_SBYTE] && isNumber){
+        UA_SByte v = (UA_SByte)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
             goto on_error;
         }
-    }else if(type == &UA_TYPES[UA_TYPES_BOOLEAN] && (cJSON_IsBool(value) || cJSON_IsNumber(value))){
+    }else if (type == &UA_TYPES[UA_TYPES_BYTE] && isNumber){
+        UA_Byte v = (UA_Byte)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_INT16] && isNumber){
+        UA_Int16 v = (UA_Int16)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_UINT16] && isNumber){
+        UA_UInt16 v = (UA_UInt16)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_INT32] && isNumber){
+        UA_Int32 v = (UA_Int32)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_UINT32] && isNumber){
+        UA_UInt32 v = (UA_UInt32)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_INT64] && isNumber){
+        UA_Int64 v = (UA_Int64)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_UINT64] && isNumber){
+        UA_UInt64 v = (UA_UInt64)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_FLOAT] && isNumber){
+        UA_Float v = (UA_Float)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if (type == &UA_TYPES[UA_TYPES_DOUBLE] && isNumber){
+        UA_Double v = (UA_Double)value->valuedouble;
+        if ( UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
+    }else if(type == &UA_TYPES[UA_TYPES_BOOLEAN] && isNumber){
         UA_Boolean v = (value->valuedouble != 0) ;
-        if ( UA_Variant_setScalarCopy( result, &v, &UA_TYPES[UA_TYPES_BOOLEAN]) == UA_STATUSCODE_GOOD) {
+        if ( UA_Variant_setScalarCopy( result, &v, &UA_TYPES[UA_TYPES_BOOLEAN]) != UA_STATUSCODE_GOOD) {
             goto on_error;
         }
     } else if( type == &UA_TYPES[UA_TYPES_STRING] && cJSON_IsString(value) && value->valuestring != NULL){
         UA_String  v =  UA_STRING((char *)value->valuestring);
-        if (UA_Variant_setScalarCopy( result, &v, type) == UA_STATUSCODE_GOOD){
+        if (UA_Variant_setScalarCopy( result, &v, type) != UA_STATUSCODE_GOOD){
             goto on_error;
         }
     }else{

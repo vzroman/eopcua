@@ -24,6 +24,7 @@
 %%==============================================================================
 -export([
     start_link/1, start_link/2,
+    set_log_level/2,
     stop/1
 ]).
 
@@ -31,12 +32,12 @@
 %%	Protocol API
 %%==============================================================================
 -export([
+    browse_servers/2,browse_servers/3,
     connect/2,connect/3,
-    read/2,read/3,
-    write/2,write/3,
-    subscribe/2,subscribe/3,
-    update_subscriptions/1,update_subscriptions/2,
-    browse_endpoints/2,browse_endpoints/3,
+    read_items/2,read_items/3,
+    read_item/2,read_item/3,
+    write_items/2,write_items/3,
+    write_item/3,write_item/4,
     browse_folder/2,browse_folder/3,
     items_tree/1,items_tree/2,
     create_certificate/1
@@ -73,38 +74,45 @@ start_link(Name, Options) ->
 stop(PID) ->
     eport_c:stop( PID ).
 
+set_log_level(PID, Level)->
+    eport_c:set_log_level(PID, Level).
 %%==============================================================================
 %%	Protocol API
 %%==============================================================================
+browse_servers(PID, Params)->
+    browse_servers(PID, Params,?RESPONSE_TIMEOUT).
+browse_servers(PID, Params, Timeout)->
+    eport_c:request( PID, <<"browse_servers">>, Params, Timeout ).
+
 % Params example:
 %     {
-%         host => <<"localhost">>,
-%         port => 4841,
+%         url => <<"opc.tcp://192.168.1.88:53530/OPCUA/SimulationServer">>,
 %         ----optional---------
-%         endpoint => <<"OPCUA/SimulationServer">>,
 %         login => <<"user1">>,
-%         password => <<"secret">>
+%         password => <<"secret">>,
+%         update_cycle => 100
 %     }
 connect(PID, Params)->
     connect(PID, Params,?CONNECT_TIMEOUT).
 connect(PID, Params, Timeout)->
-    eport_c:request( PID, <<"connect">>, Params, Timeout ).   
+    case eport_c:request( PID, <<"connect">>, Params, Timeout ) of
+        {ok, <<"ok">>} -> ok;
+        Error -> Error
+    end.
 
-read(PID, Items)->
-    read(PID,Items,?RESPONSE_TIMEOUT).
-read(PID, Items, Timeout) when is_map( Items )->
+read_items(PID, Items)->
+    read_items(PID,Items,?RESPONSE_TIMEOUT).
+read_items(PID, Items, Timeout) when is_map( Items )->
     Items1 = maps:to_list( Items ),
-    case read( PID, Items1, Timeout ) of
+    case read_items( PID, Items1, Timeout ) of
         {ok, Results}->
             Results1 = maps:from_list(lists:zip( Items1, Results )),
             {ok, Results1};
         Error->
             Error
-    end;    
-read(PID, Items, Timeout)->
-    Items1 = 
-        [ binary:split(I, <<"/">>, [global] ) || I <- Items],
-    case eport_c:request( PID, <<"read">>, Items1, Timeout ) of
+    end;
+read_items(PID, Items, Timeout)->
+    case eport_c:request( PID, <<"read_items">>, Items, Timeout ) of
         {ok, Values}->
             Values1 = 
                 [ case V of
@@ -112,75 +120,42 @@ read(PID, Items, Timeout)->
                         {error, ItemError};
                     _-> V
                   end || V <- Values ],
-            { ok, Values1 };   
+            { ok, maps:from_list(lists:zip( Items, Values1 )) };
         Error->
             Error
     end.
 
-write(PID, Items)->
-    write(PID,Items,?RESPONSE_TIMEOUT).
-write(PID, Items, Timeout) when is_map( Items )->
-    Items1 = maps:to_list( Items ),
-    case write(PID, Items1, Timeout) of
+read_item(PID, Item)->
+    read_item(PID,Item,?RESPONSE_TIMEOUT).
+read_item(PID, Item, Timeout)->
+    eport_c:request( PID, <<"read_item">>, Item, Timeout ).
+
+write_items(PID, Items)->
+    write_items(PID,Items,?RESPONSE_TIMEOUT).
+write_items(PID, Items, Timeout)->
+    Items1 =
+        [ [ I, V] || {I, V} <- maps:to_list( Items )],
+    case eport_c:request( PID, <<"write_items">>, Items1, Timeout ) of
         {ok, Results}->
-            Results1 = maps:from_list(lists:zip( Items1, Results )),
-            { ok, Results1 };
-        Error->
-            Error
-    end;
-write(PID, Items, Timeout)->
-    Items1 = 
-        [ [ binary:split(I, <<"/">>, [global] ), V] || {I, V} <- Items],
-    case eport_c:request( PID, <<"write">>, Items1, Timeout ) of
-        {ok, Results}->
-            update_subscriptions(PID),
-            Results1 = 
+            Results1 =
                 [ case V of
-                    <<"error: ", ItemError/binary>>->
-                        {error, ItemError};
-                    _-> ok
+                      <<"error: ", ItemError/binary>>->
+                          {error, ItemError};
+                      _-> ok
                   end || V <- Results ],
-            { ok, Results1 };   
+            { ok, maps:from_list(lists:zip( [I || [I,_] <- Items1], Results1 )) };
         Error->
             Error
-    end.    
+    end.
 
-subscribe(PID, Items)->
-    subscribe(PID,Items,?RESPONSE_TIMEOUT).
-subscribe(PID, Items, Timeout) when is_map(Items)->
-    Items1 = maps:to_list( Items ),
-    case subscribe( PID, Items1, Timeout ) of
-        {ok, Results}->
-            Results1 = maps:from_list(lists:zip( Items1, Results )),
-            {ok, Results1};
-        Error->
-            Error
-    end;
-subscribe(PID, Items, Timeout)->
-    Items1 = 
-        [ binary:split(I, <<"/">>, [global] ) || I <- Items],
-    case eport_c:request( PID, <<"subscribe">>, Items1, Timeout ) of
-        {ok, Values}->
-            Values1 = 
-                [ case V of
-                    <<"error: ", ItemError/binary>>->
-                        {error, ItemError};
-                    _-> V
-                  end || V <- Values ],
-            { ok, Values1 };   
-        Error->
-            Error
-    end.    
 
-update_subscriptions(PID)->
-    update_subscriptions(PID,?RESPONSE_TIMEOUT).
-update_subscriptions(PID, Timeout)->
-    eport_c:request( PID, <<"update_subscriptions">>, <<"true">>, Timeout ).
-
-browse_endpoints(PID, Params)->
-    browse_endpoints(PID, Params,?RESPONSE_TIMEOUT).
-browse_endpoints(PID, Params, Timeout)->
-    eport_c:request( PID, <<"browse_endpoints">>, Params, Timeout ).  
+write_item(PID, Item, Value)->
+    write_item(PID,Item, Value,?RESPONSE_TIMEOUT).
+write_item(PID, Item, Value, Timeout)->
+    case eport_c:request( PID, <<"write_item">>, [Item,Value], Timeout ) of
+        {ok, <<"ok">>} -> ok;
+        Error -> Error
+    end.
 
 browse_folder(PID, Path)->
     browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
@@ -191,7 +166,7 @@ items_tree(PID)->
     items_tree(PID, ?RESPONSE_TIMEOUT).
 items_tree(PID, Timeout)->
     try
-        {ok, items_tree(PID,Timeout,_Path = [])}
+        {ok, items_tree(PID,Timeout,_Path = <<>>)}
     catch
         _:Error-> {error, Error}
     end.
@@ -199,15 +174,20 @@ items_tree(PID,Timeout,Path)->
     case browse_folder(PID,Path,Timeout) of
         {ok,Items}->
             maps:fold(fun(Name,Item,Acc)->
-                case Item of
-                    #{<<"type">> := ?FOLDER_TYPE,<<"id">>:=ID}->
-                        Acc#{Name => #{<<"id">>=>ID, <<"children">>=> items_tree(PID,Timeout,Path ++ [Name])}};
-                    #{<<"type">> := ?TAG_TYPE,<<"id">>:=ID}->
-                        Acc#{Name => ID};
-                    _->
+                ItemPath =
+                    if
+                        Path =:= <<>> -> Name;
+                        true -> <<Path/binary,"/",Name/binary>>
+                    end,
+                if
+                    Item =:= ?FOLDER_TYPE ->
+                        Acc#{Name => #{<<"id">>=>ItemPath, <<"children">>=> items_tree(PID,Timeout,ItemPath)}};
+                    Item =:= ?TAG_TYPE ->
+                        Acc#{Name => ItemPath};
+                    true ->
                         % Ignore other types
                         Acc
-                end    
+                end
             end,#{},Items);
         {error,Error}->
             throw(Error)

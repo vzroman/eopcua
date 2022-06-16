@@ -27,6 +27,7 @@
 
 char** str_split(char* a_str, const char a_delim);
 void str_split_destroy(char** tokens);
+char* str_replace(const char* source, const char* search, const char* replace);
 
 UA_ByteString* parse_base64(char* base64string);
 char* parse_certificate_uri(UA_ByteString *certificate, char **error);

@@ -16,21 +16,32 @@ Client Example
     
     {ok,Port} = eopcua_client:start_link(<<"my_connection">>).
     
-    {ok,EndpointList} = eopcua_client:browse_endpoints(Port, #{ host=> <<"localhost">>, port => 4840 } ).
+    {ok,ServerList} = eopcua_client:browse_servers(Port, #{ host=> <<"localhost">>, port => 53530 } ).
     
-    {ok,<<"ok">>} = eopcua_client:connect(Port, #{ host=> <<"localhost">>, port => 4840, endpoint => <<"OPCUA/SimulationServer">> }).
+    ok = eopcua_client:connect(Port, #{ url => hd(ServerList) }).
     
-    {ok,SubItems} = eopcua_client:browse_folder(Port, [ <<"StaticData">>,<<"AnalogItems">> ] ).
+    {ok,SubItems} = eopcua_client:browse_folder(Port, <<"StaticData/AnalogItems">> ).
     
     {ok,Tree} = eopcua_client:items_tree(Port ).
     
-    {ok,[State,Sinusoid]} = eopcua_client:read(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
+    {ok,SinusoidValue} = eopcua_client:read_item(Port, <<"Simulation/Sinusoid">> ).
+
+    {ok,#{
+        <<"Server/ServerStatus/State">> := State,
+        <<"Simulation/Sinusoid">> := Sinusoid
+    }} = eopcua_client:read_items(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
     
-    {ok,[ok, {error,Error}]} = eopcua_client:write(Port, [ {<<"StaticData/AnalogItems/Int32AnalogItem">>, 34}, {<<"StaticData/AnalogItems/FloatAnalogItem">>, 34.34}]).
+    ok = eopcua_client:write_item(Port, <<"StaticData/AnalogItems/Int32AnalogItem">>, 38).
+
+    {ok,#{
+        <<"StaticData/AnalogItems/Int32AnalogItem">> := ok,
+        <<"StaticData/AnalogItems/ItDoesnNotExist">> := {error, Error}
+    }} = eopcua_client:write_items(Port, #{<<"StaticData/AnalogItems/Int32AnalogItem">> => 34, <<"StaticData/AnalogItems/ItDoesnNotExist">> => 34.34}).
+
+    ok = eopcua_client:set_log_level(Port, trace).  #; trace, debug, info, warning, error, fatal
+
+    eopcua_client:stop(Port).
     
-    {ok,[State,{error,Error}]} = eopcua_client:subscribe(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
-    
-    {ok,<<"ok">>} = eopcua_client:update_subscriptions(Port).
     
 Client Secured Connection
 -----
