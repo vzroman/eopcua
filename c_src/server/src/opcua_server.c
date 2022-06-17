@@ -37,6 +37,9 @@
 //----------------------------------------
 #include "utilities.h"
 
+//------------test------------------------
+#include "opcua_server_test.h"
+
 //-----------command handlers-------------
 cJSON* on_request( char *method, cJSON *args, char **error );
 
@@ -49,9 +52,6 @@ static void *server_thread(void* arg);
 
 //------------utilities-----------------------
 char** str_split(char* a_str, const char a_delim);
-
-//------------test-----------------------
-void testStartServer();
 
 // The RUN flag
 static volatile UA_Boolean running = true;
@@ -189,14 +189,13 @@ int main(int argc, char *argv[]) {
 
     // LOGINFO("enter eport_loop");
     // eport_loop( &on_request );
-    testStartServer();
+    //testStartServer();
 
-    sleep(10);
+    test_server_start();
+    discovery_test("opc.tcp://localhost:4840");
+    sleep(600);
+
+    test_server_stop();
+
     return EXIT_SUCCESS;
-}
-
-void testStartServer(){
-    char **error = NULL;
-    cJSON *args = NULL; 
-    opcua_server_start(args, error);
 }

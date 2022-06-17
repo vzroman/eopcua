@@ -66,6 +66,36 @@ Client Secured Connection
 
 Server Example
 -----
+    Config = #{
+        host => <<"mynode">>,
+        port => 4840,   % ???
+        users => [      % ???
+            #{
+                login => <<"ByMeBeer">>,
+                password => <<"please">>
+            },
+        ],
+        description => #{
+            productName => <<"Faceplate OPCUA Server">>,
+            productUri => <<"http://faceplate.io">>,
+            manufacturerName => <<"Faceplate">>,
+            softwareVersion => <<"0.0.1">>,
+            applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>, % must be the same as in server sertificate
+            
+        },
+        serverCertificate => <<"base64 encoded certificate in der format">>,
+        limits => #{
+            maxSecureChannels => ,
+            maxSecurityTokenLifetime => , % in ms
+            maxSessions => ,
+            maxSessionTimeout => ,
+            maxNodesPerRead => ,
+            maxNodesPerWrite => 
+        }
+    }.
+
+
+
     {ok, Port} = eopcua_server:start_link(<<"my_server">>).
 
     {ok, <<"ok">>} = eopcua_server:start_server(Port, #{}).
