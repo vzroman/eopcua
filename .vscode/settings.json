@@ -3,7 +3,16 @@
         "cstddef": "cpp",
         "*.tcc": "c",
         "cstdlib": "c",
-        "memory": "c"
+        "memory": "c",
+        "eport_c.h": "c",
+        "utilities.h": "c",
+        "opcua_client.h": "c",
+        "types_generated_handling.h": "c",
+        "types_generated_encoding_binary.h": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "ranges": "c"
     },
     "erlang.includePaths":[
         "include"

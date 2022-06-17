@@ -1,0 +1,238 @@
+%%----------------------------------------------------------------
+%% Copyright (c) 2021 Faceplate
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%----------------------------------------------------------------
+-module(eopcua_client).
+
+-include("eopcua.hrl").
+
+%%==============================================================================
+%%	Control API
+%%==============================================================================
+-export([
+    start_link/1, start_link/2,
+    set_log_level/2,
+    stop/1
+]).
+
+%%==============================================================================
+%%	Protocol API
+%%==============================================================================
+-export([
+    browse_servers/2,browse_servers/3,
+    connect/2,connect/3,
+    read_items/2,read_items/3,
+    read_item/2,read_item/3,
+    write_items/2,write_items/3,
+    write_item/3,write_item/4,
+    browse_folder/2,browse_folder/3,
+    items_tree/1,items_tree/2,
+    create_certificate/1
+]).
+
+-export([
+    test/0
+]).
+
+-define(CONNECT_TIMEOUT,30000).
+-define(RESPONSE_TIMEOUT,5000).
+-define(NO_ACTIVITY_TIMEOUT,300000). % 5 min
+
+-define(FOLDER_TYPE,1).
+-define(TAG_TYPE,2).
+
+-define(HEADER_LENGTH,4).
+
+%%==============================================================================
+%%	Control API
+%%==============================================================================
+start_link(Name) ->
+    start_link(Name,#{ response_timeout => ?RESPONSE_TIMEOUT }).
+start_link(Name, Options) ->
+    Dir=code:priv_dir(eopcua),
+    Source=
+        case os:type() of
+            {unix, linux}->atom_to_list( ?MODULE );
+            {win32, _}->atom_to_list( ?MODULE ) ++ ".exe"
+        end,
+    SourcePath = unicode:characters_to_binary(Dir ++ "/" ++ Source),
+    eport_c:start_link(SourcePath, Name, Options).
+
+stop(PID) ->
+    eport_c:stop( PID ).
+
+set_log_level(PID, Level)->
+    eport_c:set_log_level(PID, Level).
+%%==============================================================================
+%%	Protocol API
+%%==============================================================================
+browse_servers(PID, Params)->
+    browse_servers(PID, Params,?RESPONSE_TIMEOUT).
+browse_servers(PID, Params, Timeout)->
+    eport_c:request( PID, <<"browse_servers">>, Params, Timeout ).
+
+% Params example:
+%     {
+%         url => <<"opc.tcp://192.168.1.88:53530/OPCUA/SimulationServer">>,
+%         ----optional---------
+%         login => <<"user1">>,
+%         password => <<"secret">>,
+%         update_cycle => 100
+%     }
+connect(PID, Params)->
+    connect(PID, Params,?CONNECT_TIMEOUT).
+connect(PID, Params, Timeout)->
+    case eport_c:request( PID, <<"connect">>, Params, Timeout ) of
+        {ok, <<"ok">>} -> ok;
+        Error -> Error
+    end.
+
+read_items(PID, Items)->
+    read_items(PID,Items,?RESPONSE_TIMEOUT).
+read_items(PID, Items, Timeout) when is_map( Items )->
+    Items1 = maps:to_list( Items ),
+    case read_items( PID, Items1, Timeout ) of
+        {ok, Results}->
+            Results1 = maps:from_list(lists:zip( Items1, Results )),
+            {ok, Results1};
+        Error->
+            Error
+    end;
+read_items(PID, Items, Timeout)->
+    case eport_c:request( PID, <<"read_items">>, Items, Timeout ) of
+        {ok, Values}->
+            Values1 = 
+                [ case V of
+                    <<"error: ", ItemError/binary>>->
+                        {error, ItemError};
+                    _-> V
+                  end || V <- Values ],
+            { ok, maps:from_list(lists:zip( Items, Values1 )) };
+        Error->
+            Error
+    end.
+
+read_item(PID, Item)->
+    read_item(PID,Item,?RESPONSE_TIMEOUT).
+read_item(PID, Item, Timeout)->
+    eport_c:request( PID, <<"read_item">>, Item, Timeout ).
+
+write_items(PID, Items)->
+    write_items(PID,Items,?RESPONSE_TIMEOUT).
+write_items(PID, Items, Timeout)->
+    Items1 =
+        [ [ I, V] || {I, V} <- maps:to_list( Items )],
+    case eport_c:request( PID, <<"write_items">>, Items1, Timeout ) of
+        {ok, Results}->
+            Results1 =
+                [ case V of
+                      <<"error: ", ItemError/binary>>->
+                          {error, ItemError};
+                      _-> ok
+                  end || V <- Results ],
+            { ok, maps:from_list(lists:zip( [I || [I,_] <- Items1], Results1 )) };
+        Error->
+            Error
+    end.
+
+
+write_item(PID, Item, Value)->
+    write_item(PID,Item, Value,?RESPONSE_TIMEOUT).
+write_item(PID, Item, Value, Timeout)->
+    case eport_c:request( PID, <<"write_item">>, [Item,Value], Timeout ) of
+        {ok, <<"ok">>} -> ok;
+        Error -> Error
+    end.
+
+browse_folder(PID, Path)->
+    browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
+browse_folder(PID, Path, Timeout)->
+    eport_c:request( PID, <<"browse_folder">>, Path, Timeout ).  
+
+items_tree(PID)->
+    items_tree(PID, ?RESPONSE_TIMEOUT).
+items_tree(PID, Timeout)->
+    try
+        {ok, items_tree(PID,Timeout,_Path = <<>>)}
+    catch
+        _:Error-> {error, Error}
+    end.
+items_tree(PID,Timeout,Path)->
+    case browse_folder(PID,Path,Timeout) of
+        {ok,Items}->
+            maps:fold(fun(Name,Item,Acc)->
+                ItemPath =
+                    if
+                        Path =:= <<>> -> Name;
+                        true -> <<Path/binary,"/",Name/binary>>
+                    end,
+                if
+                    Item =:= ?FOLDER_TYPE ->
+                        Acc#{Name => #{<<"id">>=>ItemPath, <<"children">>=> items_tree(PID,Timeout,ItemPath)}};
+                    Item =:= ?TAG_TYPE ->
+                        Acc#{Name => ItemPath};
+                    true ->
+                        % Ignore other types
+                        Acc
+                end
+            end,#{},Items);
+        {error,Error}->
+            throw(Error)
+    end.   
+
+create_certificate( Name )->
+    Priv = code:priv_dir(eopcua),
+    Key = Priv++"/eopcua.pem",
+    Cert = Priv++"/eopcua.der",
+
+    Cmd = 
+        "openssl req -new -x509  -config "++
+        Priv++"/cert/example.cert.config -newkey rsa:2048 -keyout "++
+        Key++" -nodes -outform der "++
+        "-subj '/CN="++unicode:characters_to_list(Name)++"' "++
+        "-out "++Cert,
+    
+    Out = os:cmd( Cmd ),
+
+    Result =
+        case { file:read_file(Key), file:read_file(Cert) } of
+            { {ok, KeyData}, {ok, CertData} }->
+                {ok, #{ key => KeyData, certificate => CertData } };
+            _->
+                {error, { Cmd, Out }}
+        end,
+    file:delete(Key),
+    file:delete(Cert),
+
+    Result.
+
+test()->
+    {ok,Port} = eopcua_client:start_link(<<"my_connection">>),
+
+    {ok, Cert} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.der"),
+    {ok, Key} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.pem"),
+
+    {ok,<<"ok">>} = eopcua_client:connect(Port, #{
+        host=> <<"localhost">>, 
+        port => 53530, endpoint => <<"OPCUA/SimulationServer">>, 
+        login => <<"test_user">>, 
+        password => <<"111111">>, 
+        certificate=> base64:encode(Cert), 
+        private_key=> base64:encode( Key)
+    }).
+
+
+

@@ -15,11 +15,8 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#include <eport.h>
 #include <uthash.h>
-
-// Update cycle is 100ms
-#define OPCUA_CLIENT_SUBSCRIPTION_CYCLE 100
+#include <open62541/types.h>
 
 typedef struct {
   char *path;
@@ -30,9 +27,6 @@ typedef struct {
 typedef struct {
   int id;
   UA_Variant *value;
+  UA_NodeId nodeId;
   UT_hash_handle hh;
 } opcua_client_subscription;
-
-
-// The request handler definition
-char* on_request( char *request );

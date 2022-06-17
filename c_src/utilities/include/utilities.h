@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------
-* Copyright (c) 2021 Faceplate
+* Copyright (c) 2022 Faceplate
 *
 * This file is provided to you under the Apache License,
 * Version 2.0 (the "License"); you may not use this file
@@ -15,31 +15,24 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
+#include <open62541/types.h>
+#include <open62541/types_generated.h>
+#include <open62541/types_generated_handling.h>
+#include <open62541/util.h>
+//----------------------------------------
 #include <cjson/cJSON.h>
 
-typedef unsigned long TID;
+#ifndef eopcua_utilities__h
+#define eopcua_utilities__h
 
-// Command types
-typedef enum OPCUA_CLIENT_CMD_T {
-    OPCUA_CLIENT_CONNECT,
-    OPCUA_CLIENT_READ,
-    OPCUA_CLIENT_WRITE,
-    OPCUA_CLIENT_SUBSCRIBE,
-    OPCUA_CLIENT_UPDATE_SUBSCRIPTIONS,
-    OPCUA_CLIENT_BROWSE_ENDPOINTS,
-    OPCUA_CLIENT_BROWSE_FOLDER
-} OPCUA_CLIENT_CMD;
+char** str_split(char* a_str, const char a_delim);
+void str_split_destroy(char** tokens);
+char* str_replace(const char* source, const char* search, const char* replace);
 
-// Request
-typedef struct opcua_client_request{
-    OPCUA_CLIENT_CMD cmd;
-    TID tid;
-    cJSON *body;
-} OPCUA_CLIENT_REQUEST;
+UA_ByteString* parse_base64(char* base64string);
+char* parse_certificate_uri(UA_ByteString *certificate, char **error);
 
-// Parse a request
-int parse_request( const char *message, OPCUA_CLIENT_REQUEST* request );
-void purge_request( OPCUA_CLIENT_REQUEST *request );
+cJSON* ua2json( const UA_DataType *type, void *value );
+UA_Variant *json2ua(const UA_DataType *type, cJSON *value);
 
-// Build response
-char* create_response( OPCUA_CLIENT_REQUEST *request, cJSON *response );
+#endif
