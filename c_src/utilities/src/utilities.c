@@ -31,8 +31,6 @@
 //----------------------------------------
 #include "utilities.h"
 
-bool uaIsNumber( const UA_DataType *type );
-
 char** str_split(char* a_str, const char a_delim){
 
     // Check id the string is empty
@@ -241,13 +239,32 @@ on_error:
 cJSON* ua2json( const UA_DataType *type, void *value ){
     cJSON *result = NULL;
 
-    if (uaIsNumber( type )){
-        result = cJSON_CreateNumber( *(UA_Double*)value );
-    }else if( type == &UA_TYPES[UA_TYPES_BOOLEAN]){
+    if( type == &UA_TYPES[UA_TYPES_BOOLEAN] ){
         result = cJSON_CreateBool( *(UA_Boolean*)value );
-    }else if( type == &UA_TYPES[UA_TYPES_STRING]){
+    }else if( type == &UA_TYPES[UA_TYPES_SBYTE] ){
+        result = cJSON_CreateNumber( *(UA_SByte*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_BYTE] ){
+        result = cJSON_CreateNumber( *(UA_Byte*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_INT16] ){
+        result = cJSON_CreateNumber( *(UA_Int16*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_UINT16] ){
+        result = cJSON_CreateNumber( *(UA_UInt16*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_INT32] ){
+        result = cJSON_CreateNumber( *(UA_Int32*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_UINT32] ){
+        result = cJSON_CreateNumber( *(UA_UInt32*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_INT64] ){
+        result = cJSON_CreateNumber( *(UA_Int64*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_UINT64] ){
+        result = cJSON_CreateNumber( *(UA_UInt64*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_FLOAT] ){
+        result = cJSON_CreateNumber( *(UA_Float*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_DOUBLE] ){
+        result = cJSON_CreateNumber( *(UA_Double*)value );
+    }else if( type == &UA_TYPES[UA_TYPES_STRING] ){
         result = cJSON_CreateString( (char *)((UA_String*)value)->data );
     }
+
     // TODO. Support other types
     return result;
 }
@@ -325,31 +342,4 @@ UA_Variant *json2ua(const UA_DataType *type, cJSON *value){
 on_error:
     UA_Variant_delete(result);
     return NULL;
-}
-
-bool uaIsNumber( const UA_DataType *type ){
-
-    if( type == &UA_TYPES[UA_TYPES_SBYTE]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_BYTE]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_INT16]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_UINT16]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_INT32]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_UINT32]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_INT64]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_UINT64]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_FLOAT]){
-        return true;
-    }else if( type == &UA_TYPES[UA_TYPES_DOUBLE]){
-        return true;
-    }
-
-    return false;
 }
