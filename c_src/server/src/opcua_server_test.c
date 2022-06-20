@@ -38,6 +38,7 @@
 #include <openssl/bio.h>
 
 //----------------------------------------
+#include "utilities.h"
 #include "opcua_server_test.h"
 
 //----------local functions---------------
@@ -50,7 +51,33 @@ int test_server_start(void){
 
     UA_Server *server = UA_Server_new();
     UA_ServerConfig *config = UA_Server_getConfig(server);
-    UA_ServerConfig_setDefault(config);
+
+    // No encription
+    // UA_ServerConfig_setDefault(config);
+
+    // encription
+    UA_ByteString certificate = loadFile("eopcua.cert.der");
+    UA_ByteString privateKey = loadFile("eopcua.key.pem");
+    if (certificate.length == 0){
+        printf("\r\n------------------INVALID CERTIFICATE-------------------\r\n");
+    }
+
+    /* Loading of a issuer list, not used in this application */
+    size_t trustListSize = 0;
+    UA_ByteString *trustList = NULL;
+    /* Loading of a issuer list, not used in this application */
+    size_t issuerListSize = 0;
+    UA_ByteString *issuerList = NULL;
+
+    /* Loading of a revocation list currently unsupported */
+    UA_ByteString *revocationList = NULL;
+    size_t revocationListSize = 0;
+
+    UA_ServerConfig_setDefaultWithSecurityPolicies(config, 4840,
+                                                       &certificate, &privateKey,
+                                                       trustList, trustListSize,
+                                                       issuerList, issuerListSize,
+                                                       revocationList, revocationListSize);
 
     config->buildInfo.productName = UA_STRING_ALLOC("Faceplate OPCUA Server");
     config->buildInfo.productUri = UA_STRING_ALLOC("http://faceplate.io");
