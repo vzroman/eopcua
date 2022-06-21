@@ -35,5 +35,6 @@ char* parse_certificate_uri(UA_ByteString *certificate, char **error);
 
 cJSON* ua2json( const UA_DataType *type, void *value );
 UA_Variant *json2ua(const UA_DataType *type, cJSON *value);
+const UA_DataType *type2ua(const char *type );
 
 #endif

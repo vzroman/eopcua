@@ -192,7 +192,9 @@ int main(int argc, char *argv[]) {
     //testStartServer();
 
     test_server_start();
+    sleep(2);
     discovery_test("opc.tcp://localhost:4840");
+    add_simple_node_test("TAGS/My folder/AI", "Double", cJSON_CreateNumber(56.0));
     sleep(600);
 
     test_server_stop();

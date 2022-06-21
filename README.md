@@ -68,8 +68,8 @@ Server Example
 -----
     Config = #{
         host => <<"mynode">>,
-        port => 4840,   % ???
-        users => [      % ???
+        port => 4840,
+        users => [
             #{
                 login => <<"ByMeBeer">>,
                 password => <<"please">>
@@ -83,7 +83,14 @@ Server Example
             applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>, % must be the same as in server sertificate
             
         },
-        serverCertificate => <<"base64 encoded certificate in der format">>,
+        encription => #{
+            certificate => <<"base64 encoded certificate in der format">>,
+            private_key => <<"base64 encoded private key in pem format">>,
+            trustList => [
+                <<"base64 encoded certificate in der format">>
+            ],
+            
+        },
         limits => #{
             maxSecureChannels => ,
             maxSecurityTokenLifetime => , % in ms

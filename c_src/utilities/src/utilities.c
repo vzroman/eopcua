@@ -370,3 +370,35 @@ on_error:
     UA_Variant_delete(result);
     return NULL;
 }
+
+const UA_DataType *type2ua(const char *type ){
+
+    if( strcmp(type,"Bool") == 0 ){
+        return &UA_TYPES[UA_TYPES_BOOLEAN];
+    }else if( strcmp(type,"SByte") == 0 ){
+        return &UA_TYPES[UA_TYPES_SBYTE];
+    }else if( strcmp(type,"Byte") == 0){
+        return &UA_TYPES[UA_TYPES_BYTE];
+    }else if( strcmp(type,"Int16")==0 ){
+        return &UA_TYPES[UA_TYPES_INT16];
+    }else if( strcmp(type,"UInt16")==0 ){
+        return &UA_TYPES[UA_TYPES_UINT16];
+    }else if( strcmp(type,"Int32")==0 ){
+        return &UA_TYPES[UA_TYPES_INT32];
+    }else if( strcmp(type,"UInt32")==0 ){
+        return &UA_TYPES[UA_TYPES_UINT32];
+    }else if( strcmp(type,"Int64")==0 ){
+        return &UA_TYPES[UA_TYPES_INT64];
+    }else if( strcmp(type,"UInt64")==0 ){
+        return &UA_TYPES[UA_TYPES_UINT64];
+    }else if( strcmp(type,"Float")==0 ){
+        return &UA_TYPES[UA_TYPES_FLOAT];
+    }else if( strcmp(type,"Double")==0 ){
+        return &UA_TYPES[UA_TYPES_DOUBLE];
+    }else if( strcmp(type,"String")==0 ){
+        return &UA_TYPES[UA_TYPES_STRING];
+    }
+
+    // TODO. Support other types
+    return NULL;
+}
