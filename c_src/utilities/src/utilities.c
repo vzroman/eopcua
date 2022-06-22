@@ -149,6 +149,48 @@ error:
     return NULL;
 }
 
+char *base64_files(cJSON *files, UA_ByteString **result){
+    char *error = NULL;
+    UA_StatusCode sc;
+
+    *result = NULL;
+    int size = cJSON_GetArraySize( files );
+
+    *result = (UA_ByteString *) UA_malloc(size * sizeof(UA_ByteString));
+    if (!*result){
+        error = "out of memory";
+        goto on_error;
+    }
+
+    for (int i=0; i < size; i++){
+        cJSON *file = cJSON_GetArrayItem(files, i);
+        if (!cJSON_IsString(file) || (file->valuestring == NULL)){
+            error = "file body is not defined";
+            // It is a secure connection, the key must be provided
+            goto on_error;
+        }
+        UA_ByteString * fileBody = parse_base64( file->valuestring );
+        if (fileBody == NULL){
+            error = "unable to parse file body from base64";
+            goto on_error;
+        }
+        sc = UA_ByteString_copy(fileBody, &(*result[i]) );
+        UA_ByteString_delete( fileBody );
+
+        if (sc != UA_STATUSCODE_GOOD){
+            error =  (char *)UA_StatusCode_name( sc );
+            goto on_error;
+        }
+    }
+
+    return error;
+
+on_error:
+    if (*result != NULL) free(*result);
+    return error;
+
+}
+
 UA_ByteString loadFile(const char* path){
 	UA_ByteString fileContents = UA_STRING_NULL;
 

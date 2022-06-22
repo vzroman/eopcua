@@ -1,5 +1,5 @@
 /*----------------------------------------------------------------
-* Copyright (c) 2021 Faceplate
+* Copyright (c) 2022 Faceplate
 *
 * This file is provided to you under the Apache License,
 * Version 2.0 (the "License"); you may not use this file
@@ -23,9 +23,7 @@
 //----------------------------------------
 #include <eport_c.h>
 //----------------------------------------
-#include <open62541/plugin/log_stdout.h>
 #include <open62541/server.h>
-#include <open62541/server_config_default.h>
 //----------------------------------------
 #include <openssl/x509v3.h>
 #include <openssl/bn.h>
@@ -36,6 +34,7 @@
 #include <openssl/bio.h>
 //----------------------------------------
 #include "utilities.h"
+#include "opcua_server_config.h"
 
 //------------test------------------------
 #include "opcua_server_test.h"
@@ -50,11 +49,8 @@ cJSON *add_node(cJSON* args, char **error);
 //---------server thread entry point------
 static void *server_thread(void* arg);
 
-//------------utilities-----------------------
-char** str_split(char* a_str, const char a_delim);
-
 // The RUN flag
-static volatile UA_Boolean running = true;
+static volatile UA_Boolean running = false;
 UA_Server *server = NULL;
 
 //-------------------The command loop-------------------------------------
@@ -63,7 +59,7 @@ cJSON* on_request( char *method, cJSON *args, char **error ){
     cJSON *response = NULL;
     // Handle the request
     LOGDEBUG("handle the request %s", method);
-    if( strcmp(method, "start") == 0){
+    if( strcmp(method, "server_start") == 0){
         response = opcua_server_start( args, error );
     } else{
         *error = "invalid method";
@@ -76,8 +72,6 @@ cJSON* on_request( char *method, cJSON *args, char **error ){
 cJSON* opcua_server_start(cJSON* args, char **error){
     cJSON *response = NULL;
 
-    LOGINFO("launching a server thread");
-
     if (server != NULL){
         *error = "server is already run";
         goto on_error;
@@ -85,12 +79,14 @@ cJSON* opcua_server_start(cJSON* args, char **error){
 
     // Create a new server instance
     server = UA_Server_new();
+    UA_ServerConfig *config = UA_Server_getConfig( server );
+
+    // Configure the server accordingly to the arguments
+    *error = configure(config, args);
+    if (*error != NULL) goto on_error;
 
     // The server is going to run in a dedicated thread
     pthread_t serverThread;
-
-    // Configure the server
-    UA_ServerConfig_setDefault(UA_Server_getConfig(server));
 
     // Launch the server thread
     int res = pthread_create( &serverThread, NULL, &server_thread, server);
@@ -108,6 +104,7 @@ on_error:
     return NULL;
 
 }
+
 
 
 cJSON* opcua_server_add_nodes(cJSON* args, char **error) {
@@ -150,13 +147,16 @@ cJSON *add_node(cJSON* args, char **error){
 
 //---------------The server thread-------------------------------------------
 static void *server_thread(void *arg) {
-    UA_Server * server = arg;
-    LOGINFO("starting the server");
+    LOGINFO("starting the server thread");
 
     // The returns only when the server shuts down
+    running = true;
     UA_StatusCode retval = UA_Server_run(server, &running);
 
+    // Clean up
     UA_Server_delete(server);
+    server = NULL;
+    running = true;
 
     char *status = (char *)UA_StatusCode_name( retval );
     if (retval != UA_STATUSCODE_GOOD){
@@ -164,9 +164,6 @@ static void *server_thread(void *arg) {
     }
 
     // Set the flag to the ready state
-    running = true;
-    server = NULL;
-
     return status;
 }
 
@@ -187,17 +184,16 @@ int main(int argc, char *argv[]) {
 
     SETLOGLEVEL(0);
 
-    // LOGINFO("enter eport_loop");
-    // eport_loop( &on_request );
-    //testStartServer();
+    LOGINFO("enter eport_loop");
+    eport_loop( &on_request );
 
-    test_server_start();
-    sleep(2);
-    discovery_test("opc.tcp://localhost:4840");
-    add_simple_node_test("TAGS/My folder/AI", "Double", cJSON_CreateNumber(56.0));
-    sleep(600);
+    // test_server_start();
+    // sleep(2);
+    // discovery_test("opc.tcp://localhost:4840");
+    // add_simple_node_test("TAGS/My folder/AI", "Double", cJSON_CreateNumber(56.0));
+    // sleep(600);
 
-    test_server_stop();
+    // test_server_stop();
 
     return EXIT_SUCCESS;
 }

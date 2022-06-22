@@ -30,6 +30,7 @@ void str_split_destroy(char** tokens);
 char* str_replace(const char* source, const char* search, const char* replace);
 
 UA_ByteString* parse_base64(char* base64string);
+char *base64_files(cJSON *files, UA_ByteString **result);
 UA_ByteString loadFile(const char* path);
 char* parse_certificate_uri(UA_ByteString *certificate, char **error);
 

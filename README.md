@@ -80,7 +80,7 @@ Server Example
             productUri => <<"http://faceplate.io">>,
             manufacturerName => <<"Faceplate">>,
             softwareVersion => <<"0.0.1">>,
-            applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>, % must be the same as in server sertificate
+            applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>
             
         },
         encription => #{
@@ -105,7 +105,23 @@ Server Example
 
     {ok, Port} = eopcua_server:start_link(<<"my_server">>).
 
-    {ok, <<"ok">>} = eopcua_server:start_server(Port, #{}).
+    ok = eopcua_server:server_start(Port, #{
+        host => <<"localhost">>,
+        port => 4842,
+        users => [
+            #{
+                login => <<"BuyMeBeer">>,
+                password => <<"please">>
+            }
+        ],
+        description => #{
+            productName => <<"Faceplate OPCUA Server">>,
+            productUri => <<"http://faceplate.io">>,
+            manufacturerName => <<"Faceplate">>,
+            softwareVersion => <<"0.0.1">>,
+            applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>
+        }
+    }).
 
     {ok, <<"ok">>} = eopcua_server:add_nodes(Port, [
         #{ path => <<"TAGS/Folder1/tag1">>, type => integer, value => 34 },
