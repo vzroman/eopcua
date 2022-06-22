@@ -44,10 +44,10 @@
 //----------local functions---------------
 static void *server_thread(void *arg);
 
-char *create_variable(char *path, char *type, cJSON *value, UA_NodeId *node);
-char *ensure_path(char **path, int depth,  UA_NodeId folder, UA_NodeId *node);
-char *find_in_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeId);
-char *create_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeId);
+char *create_variable_test(char *path, char *type, cJSON *value, UA_NodeId *node);
+char *ensure_path_test(char **path, int depth,  UA_NodeId folder, UA_NodeId *node);
+char *find_in_folder_test( const UA_NodeId folder, const char *name, UA_NodeId *nodeId);
+char *create_folder_test( const UA_NodeId folder, const char *name, UA_NodeId *nodeId);
 
 //---------local flags-------------------
 UA_Server *test_server = NULL;
@@ -119,6 +119,10 @@ int test_server_start(void){
     config->accessControl.clear(&config->accessControl);
     UA_StatusCode retval = UA_AccessControl_default(config, false, NULL,
              &config->securityPolicies[config->securityPoliciesSize-1].policyUri, userCount, users);
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_LOG_ERROR(UA_Log_Stdout, UA_LOGCATEGORY_SERVER, "Could not setup acess control StatusCode %s", UA_StatusCode_name(retval));
+        return EXIT_FAILURE;
+    }
 
     // start the server
     pthread_t serverThread;
@@ -289,7 +293,7 @@ int discovery_test(char *url) {
 int add_simple_node_test(char *path, char *type, cJSON *value) {
 
     UA_NodeId nodeId;
-    create_variable(path, type, value, &nodeId);
+    create_variable_test(path, type, value, &nodeId);
 
     // UA_NodeId dirId; /* get the nodeid assigned by the server */
     // UA_ObjectAttributes dirAttr = UA_ObjectAttributes_default;
@@ -363,9 +367,15 @@ int add_simple_node_test(char *path, char *type, cJSON *value) {
 
 }
 
-char *create_variable(char *path, char *type, cJSON *value, UA_NodeId *node) {
+char *create_variable_test(char *path, char *type, cJSON *value, UA_NodeId *node) {
     char *error = NULL;
     UA_StatusCode sc;
+
+    const UA_DataType *ua_type = type2ua( type );
+    if (ua_type == NULL){
+        error = "unsupported data type";
+        goto on_error;
+    }
 
     char *name = NULL;
     UA_NodeId folder = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
@@ -374,7 +384,7 @@ char *create_variable(char *path, char *type, cJSON *value, UA_NodeId *node) {
     if (tokens){
         int depth = 0;
         while (*(tokens + depth)) depth++;
-        error = ensure_path(tokens, depth-1, folder, &folder);
+        error = ensure_path_test(tokens, depth-1, folder, &folder);
         if (error != NULL) {
             goto on_error;
         }
@@ -390,29 +400,23 @@ char *create_variable(char *path, char *type, cJSON *value, UA_NodeId *node) {
     UA_VariableAttributes attr = UA_VariableAttributes_default;
     attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
     attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", name);
+    attr.dataType = ua_type->typeId;
     UA_QualifiedName qname = UA_QUALIFIEDNAME_ALLOC(1, name);
 
     free(name);
     name = NULL;
 
-    
-    const UA_DataType *ua_type = type2ua( type );
-    if (ua_type == NULL){
-        error = "unsupported data type";
-        goto on_error;
-    }
-
-    UA_Variant *ua_value = json2ua(ua_type, value);
-    if (ua_value == NULL){
-        error = "invalid value";
-        goto on_error;
-    }
-    sc = UA_Variant_copy(ua_value, &attr.value);
-    UA_Variant_delete(ua_value);
-    if (sc != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( sc );
-        goto on_error;
-    }
+    // UA_Variant *ua_value = json2ua(ua_type, value);
+    // if (ua_value == NULL){
+    //     error = "invalid value";
+    //     goto on_error;
+    // }
+    // sc = UA_Variant_copy(ua_value, &attr.value);
+    // UA_Variant_delete(ua_value);
+    // if (sc != UA_STATUSCODE_GOOD){
+    //     error = (char*)UA_StatusCode_name( sc );
+    //     goto on_error;
+    // }
 
     sc = UA_Server_addVariableNode(test_server, 
         UA_NODEID_NULL, 
@@ -435,7 +439,7 @@ on_error:
 }
 
 
-char *ensure_path(char **path, int depth,  UA_NodeId folder, UA_NodeId *node) {
+char *ensure_path_test(char **path, int depth,  UA_NodeId folder, UA_NodeId *node) {
 
     char *error = NULL;
 
@@ -443,11 +447,11 @@ char *ensure_path(char **path, int depth,  UA_NodeId folder, UA_NodeId *node) {
         char *name = *(path + i);
 
         printf("\r\n---------find %s-----------------\r\n",name);
-        error = find_in_folder( *node, name, node );
+        error = find_in_folder_test( *node, name, node );
         printf("\r\n\t%s find_in_folder: %s\r\n",name,error);
         if (error != NULL) {
             if (strcmp(error,"not found") == 0){
-                error = create_folder(*node, name, node);
+                error = create_folder_test(*node, name, node);
                 printf("\r\n%s create result %s\r\n",name,error);
                 if (error != NULL) break;
             }else { 
@@ -459,7 +463,7 @@ char *ensure_path(char **path, int depth,  UA_NodeId folder, UA_NodeId *node) {
     return error;
 }
 
-char *find_in_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeId ){
+char *find_in_folder_test( const UA_NodeId folder, const char *name, UA_NodeId *nodeId ){
     
     char *error = NULL;
     UA_StatusCode sc;
@@ -490,7 +494,7 @@ char *find_in_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeI
     return error;
 }
 
-char *create_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeId ){
+char *create_folder_test( const UA_NodeId folder, const char *name, UA_NodeId *nodeId ){
     char *error = NULL;
     UA_StatusCode sc;
 

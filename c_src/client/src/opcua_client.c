@@ -72,7 +72,7 @@ cJSON* on_request( char *method, cJSON *args, char **error ){
     
     cJSON *response = NULL;
     // Handle the request
-    LOGDEBUG("handle the request %s", method);
+    LOGTRACE("handle the request %s", method);
 
     // open62541 is not thread safe, we use mutex
     pthread_mutex_lock(&lock); 

@@ -114,6 +114,10 @@ Server Example
                 password => <<"please">>
             }
         ],
+        encription => #{
+            certificate => base64:encode(Cert),
+            private_key => base64:encode(Key)
+        },
         description => #{
             productName => <<"Faceplate OPCUA Server">>,
             productUri => <<"http://faceplate.io">>,
