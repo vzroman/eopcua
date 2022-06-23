@@ -34,7 +34,9 @@
 -export([
     server_start/2,
     write_items/2, write_items/3,
-    write_item/2, write_item/3
+    write_item/2, write_item/3,
+    read_items/2, read_items/3,
+    read_item/2, read_item/3
 ]).
 
 
@@ -140,6 +142,36 @@ write_item(PID, Item, Timeout)->
         Error -> Error
     end.
 
+% Items is a list of:
+%   [
+%       <<"TAGS/my_folder/temperature">>,
+%       <<"TAGS/my_folder/pressure">>
+%   ]
+read_items(PID, Items)->
+    read_items(PID,Items,?RESPONSE_TIMEOUT).
+read_items(PID, Items, Timeout)->
+    case eport_c:request( PID, <<"read_items">>, Items, Timeout ) of
+        {ok, Results}->
+            Results1 =
+                [ case V of
+                      <<"error: ", ItemError/binary>>->
+                          {error, ItemError};
+                      _-> V
+                  end || V <- Results ],
+            { ok, maps:from_list(lists:zip( Items, Results1 )) };
+        Error->
+            Error
+    end.
+
+% Item:
+%   <<"TAGS/my_folder/temperature">>
+read_item(PID, Item)->
+    read_item(PID,Item,?RESPONSE_TIMEOUT).
+read_item(PID, Item, Timeout)->
+    case eport_c:request( PID, <<"read_item">>, Item, Timeout ) of
+        {ok, <<"ok">>} -> ok;
+        Error -> Error
+    end.
 
 
 

@@ -402,7 +402,9 @@ cJSON* opcua_client_read_items(cJSON* args, char **error){
     cJSON_ArrayForEach(item, args) {
         result = opcua_client_read_item( item, error );
         if (result == NULL){
-            result = cJSON_CreateString("error: read error");
+            char _error[strlen(*error) + strlen("error: ") + 1];
+            sprintf(_error,"error: %s",*error); 
+            result = cJSON_CreateString(_error);
         }
         if ( !cJSON_AddItemToArray(response, result) ){
             *error = "unable add a result for item";
@@ -552,8 +554,9 @@ cJSON* opcua_client_write_items(cJSON* args, char **error){
     cJSON_ArrayForEach(item, args) {
         result = opcua_client_write_item( item, error );
         if (result == NULL){
-            LOGERROR("write error %s",*error);
-            result = cJSON_CreateString("error: write error");
+            char _error[strlen(*error) + strlen("error: ") + 1];
+            sprintf(_error,"error: %s",*error); 
+            result = cJSON_CreateString(_error);
         }
         if ( !cJSON_AddItemToArray(response, result) ){
             *error = "unable add a result for item";

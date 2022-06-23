@@ -46,7 +46,8 @@ cJSON* on_request( char *method, cJSON *args, char **error );
 cJSON* opcua_server_start(cJSON* args, char **error);
 cJSON* opcua_server_write_items(cJSON* args, char **error);
 cJSON* opcua_server_write_item(cJSON* args, char **error);
-cJSON *add_node(cJSON* args, char **error);
+cJSON* opcua_server_read_items(cJSON* args, char **error);
+cJSON* opcua_server_read_item(cJSON* args, char **error);
 
 //-----------path mapping-----------------
 opcua_server_mapping *opcua_server_map = NULL;
@@ -73,11 +74,15 @@ cJSON* on_request( char *method, cJSON *args, char **error ){
 
     if( strcmp(method, "server_start") == 0){
         response = opcua_server_start( args, error );
-    } else if( strcmp(method, "write_items") == 0){
+    }else if( strcmp(method, "write_items") == 0){
         response = opcua_server_write_items( args, error );
     }else if( strcmp(method, "write_item") == 0){
         response = opcua_server_write_item( args, error );
-    } else{
+    }else if( strcmp(method, "read_items") == 0){
+        response = opcua_server_read_items( args, error );
+    }else if( strcmp(method, "read_item") == 0){
+        response = opcua_server_read_item( args, error );
+    }else{
         *error = "invalid method";
     }
 
@@ -121,8 +126,7 @@ on_error:
 
 }
 
-
-
+//------------------WRITE-------------------------------------
 cJSON* opcua_server_write_items(cJSON* args, char **error){
     LOGTRACE("write items");
     cJSON *response = cJSON_CreateArray();
@@ -143,7 +147,9 @@ cJSON* opcua_server_write_items(cJSON* args, char **error){
     cJSON_ArrayForEach(item, args) {
         result = opcua_server_write_item( item, error );
         if (result == NULL){
-            result = cJSON_CreateString("error: write error");
+            char _error[strlen(*error) + strlen("error: ") +1 ];
+            sprintf(_error,"error: %s",*error); 
+            result = cJSON_CreateString(_error);
         }
         if ( !cJSON_AddItemToArray(response, result) ){
             *error = "unable add a result for item";
@@ -157,6 +163,18 @@ on_error:
     return NULL;
 }
 
+//-------------------------------------------------------------
+//  The entry point for creating and chnging values for nodes.
+//  It waits args in the next format:
+//  {
+//      "path": "some/path/to/my/variable",
+//      "type": "UInt32",
+//      "value": 56
+//  }
+//  If the node is already added to the server the mtheod 
+//  changes its value. If the path doesn't exist yet the node
+//  is created and the value is set.
+//-------------------------------------------------------------
 cJSON* opcua_server_write_item(cJSON* args, char **error){
     LOGTRACE("write item");
 
@@ -220,7 +238,7 @@ cJSON* opcua_server_write_item(cJSON* args, char **error){
         return opcua_server_write_item(args, error);
         
     }else{
-        // The binding is already in the active subscriptions
+        // The binding is already added
         LOGTRACE("write value");
 
         if (cJSON_IsNull(value)){
@@ -263,6 +281,93 @@ on_error:
     return NULL;
 }
 
+//------------------READ-------------------------------------
+cJSON* opcua_server_read_items(cJSON* args, char **error){
+    LOGTRACE("read items");
+    cJSON *response = cJSON_CreateArray();
+    cJSON *item = NULL;
+    cJSON *result = NULL;
+
+    if (opcua_server == NULL){
+        *error = "server not started";
+        goto on_error;
+    }
+
+    //-----------validate the arguments-----------------------
+    if ( !cJSON_IsArray(args) ) {
+        *error = "invalid arguments";
+        goto on_error;
+    }
+
+    cJSON_ArrayForEach(item, args) {
+        result = opcua_server_read_item( item, error );
+        if (result == NULL){
+            char _error[strlen(*error) + strlen("error: ") + 1];
+            sprintf(_error,"error: %s",*error); 
+            result = cJSON_CreateString(_error);
+        }
+        if ( !cJSON_AddItemToArray(response, result) ){
+            *error = "unable add a result for item";
+            goto on_error;
+        }
+    }
+
+    return response;
+on_error:
+    cJSON_Delete( response );
+    return NULL;
+}
+
+cJSON* opcua_server_read_item(cJSON* args, char **error){
+    LOGTRACE("read item");
+
+    UA_StatusCode sc;
+
+    if (opcua_server == NULL){
+        *error = "server not started";
+        goto on_error;
+    }
+
+    //-----------validate the arguments-----------------------
+    if (!cJSON_IsString(args) || (args->valuestring == NULL)){
+        *error = "item is not defined";
+        goto on_error; 
+    }
+
+    // get item path
+    char *path = args->valuestring;
+
+    // Lookup the binding in the collection
+    opcua_server_mapping *m = NULL;
+    HASH_FIND_STR(opcua_server_map, path, m);
+
+    if (m == NULL){
+        *error = "not found";
+        goto on_error;
+    }
+
+    UA_Variant value;
+    sc = UA_Server_readValue(opcua_server, m->nodeId, &value);
+    if (sc != UA_STATUSCODE_GOOD ) {
+        *error = (char*)UA_StatusCode_name( sc );;
+        goto on_error;
+    }
+
+    cJSON *response = ua2json( value.type, value.data );
+    if (response == NULL){
+        *error = "data type is no supported";
+        goto on_error;
+    }
+
+    return response;
+
+on_error:
+    return NULL;
+}
+
+//------------------------------------------------------------------
+//  Internal utilities
+//------------------------------------------------------------------
 char *create_variable(char *path, char *type, UA_NodeId *node) {
     char *error = NULL;
     UA_StatusCode sc;
@@ -444,18 +549,8 @@ int main(int argc, char *argv[]) {
     OpenSSL_add_all_algorithms();
     ERR_load_BIO_strings();
 
-    SETLOGLEVEL(0);
-
     LOGINFO("enter eport_loop");
     eport_loop( &on_request );
-
-    // test_server_start();
-    // sleep(2);
-    // discovery_test("opc.tcp://localhost:4840");
-    // add_simple_node_test("TAGS/My folder/AI", "Double", cJSON_CreateNumber(56.0));
-    // sleep(600);
-
-    // test_server_stop();
 
     return EXIT_SUCCESS;
 }

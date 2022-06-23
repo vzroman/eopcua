@@ -128,17 +128,20 @@ Server Example
     {ok, #{
         <<"TAGS/my_folder/temperature">> := ok,
         <<"TAGS/my_folder/pressure">> := ok         % or it can be {error, Error}
-    }}eopcua_server:write_items(Port, [
+    }} = eopcua_server:write_items(Port, [
         #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 34.56},
         #{path => <<"TAGS/my_folder/pressure">>, type => <<"UInt32">>, value => 87}
     ]).
 
-    {ok, <<"ok">>} = eopcua_server:add_nodes(Port, [
-        #{ path => <<"TAGS/Folder1/tag1">>, type => integer, value => 34 },
-        #{ path => <<"TAGS/Folder1/tag2">>, type => float, value => 12.34 },
-        #{ path => <<"TAGS/Folder2/tag1">>, type => bool, value => true },
-        #{ path => <<"TAGS/Folder2/tag2">>, type => string, value => <<"some text">> },
-        #{ path => <<"TAGS/Folder2/tag2">>, type => string, value => <<"some text">> }
+    {ok, Temperature} = eopcua_server:read_item(Port, <<"TAGS/my_folder/temperature">>).
+
+    {ok, #{
+        <<"TAGS/my_folder/temperature">> := Temperature,
+        <<"TAGS/my_folder/pressure">> := Pressure         % or it can be {error, Error}
+    }} = eopcua_server:read_items(Port, [
+        <<"TAGS/my_folder/temperature">>,
+        <<"TAGS/my_folder/pressure">>
     ]).
+    
     
     
