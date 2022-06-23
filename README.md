@@ -114,10 +114,6 @@ Server Example
                 password => <<"please">>
             }
         ],
-        encription => #{
-            certificate => base64:encode(Cert),
-            private_key => base64:encode(Key)
-        },
         description => #{
             productName => <<"Faceplate OPCUA Server">>,
             productUri => <<"http://faceplate.io">>,
@@ -126,6 +122,16 @@ Server Example
             applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>
         }
     }).
+    
+    ok = eopcua_server:write_item(Port, #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 45.67}).
+
+    {ok, #{
+        <<"TAGS/my_folder/temperature">> := ok,
+        <<"TAGS/my_folder/pressure">> := ok         % or it can be {error, Error}
+    }}eopcua_server:write_items(Port, [
+        #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 34.56},
+        #{path => <<"TAGS/my_folder/pressure">>, type => <<"UInt32">>, value => 87}
+    ]).
 
     {ok, <<"ok">>} = eopcua_server:add_nodes(Port, [
         #{ path => <<"TAGS/Folder1/tag1">>, type => integer, value => 34 },

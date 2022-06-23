@@ -32,7 +32,9 @@
 %%	Protocol API
 %%==============================================================================
 -export([
-    server_start/2
+    server_start/2,
+    write_items/2, write_items/3,
+    write_item/2, write_item/3
 ]).
 
 
@@ -103,6 +105,37 @@ set_log_level(PID, Level)->
 %}
 server_start(PID, Params)->
     case eport_c:request( PID, <<"server_start">>, Params ) of
+        {ok, <<"ok">>} -> ok;
+        Error -> Error
+    end.
+
+% Items is a list of:
+%   [
+%       #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 45.67},
+%       #{path => <<"TAGS/my_folder/pressure">>, type => <<"UInt32">>, value => 87},
+%   ]
+write_items(PID, Items)->
+    write_items(PID,Items,?RESPONSE_TIMEOUT).
+write_items(PID, Items, Timeout)->
+    case eport_c:request( PID, <<"write_items">>, Items, Timeout ) of
+        {ok, Results}->
+            Results1 =
+                [ case V of
+                      <<"error: ", ItemError/binary>>->
+                          {error, ItemError};
+                      _-> ok
+                  end || V <- Results ],
+            { ok, maps:from_list(lists:zip( [I || #{path := I} <- Items], Results1 )) };
+        Error->
+            Error
+    end.
+
+% Item:
+%   #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 45.67}
+write_item(PID, Item)->
+    write_item(PID,Item,?RESPONSE_TIMEOUT).
+write_item(PID, Item, Timeout)->
+    case eport_c:request( PID, <<"write_item">>, Item, Timeout ) of
         {ok, <<"ok">>} -> ok;
         Error -> Error
     end.

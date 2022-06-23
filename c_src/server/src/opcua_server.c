@@ -214,6 +214,8 @@ cJSON* opcua_server_write_item(cJSON* args, char **error){
             *error = (char*)UA_StatusCode_name( sc );
             goto on_error;
         }
+
+        HASH_ADD_STR(opcua_server_map, path, m);
         
         return opcua_server_write_item(args, error);
         
@@ -444,16 +446,16 @@ int main(int argc, char *argv[]) {
 
     SETLOGLEVEL(0);
 
-    // LOGINFO("enter eport_loop");
-    // eport_loop( &on_request );
+    LOGINFO("enter eport_loop");
+    eport_loop( &on_request );
 
-    test_server_start();
-    sleep(2);
-    discovery_test("opc.tcp://localhost:4840");
-    add_simple_node_test("TAGS/My folder/AI", "Double", cJSON_CreateNumber(56.0));
-    sleep(600);
+    // test_server_start();
+    // sleep(2);
+    // discovery_test("opc.tcp://localhost:4840");
+    // add_simple_node_test("TAGS/My folder/AI", "Double", cJSON_CreateNumber(56.0));
+    // sleep(600);
 
-    test_server_stop();
+    // test_server_stop();
 
     return EXIT_SUCCESS;
 }
