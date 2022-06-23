@@ -55,18 +55,16 @@ Client Secured Connection
     // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
     
     {ok,<<"ok">>} = eopcua_client:connect(Port, #{ 
-        host=> <<"localhost">>, 
-        port => 4840, 
-        endpoint => <<"OPCUA/SimulationServer">>,
+        url => <<"opc.tcp://localhost:53530/OPCUA/SimulationServer">>,
         certificate => <base64 encoded certificate in der format>,
         private_key => <base64 encoded private key in pem format>
         login => <<"test_user">>, 
         password => <<"111111">> 
     }).
 
-Server Example
+Server Config 
 -----
-    Config = #{
+    #{
         host => <<"mynode">>,
         port => 4840,
         users => [
@@ -89,7 +87,12 @@ Server Example
             trustList => [
                 <<"base64 encoded certificate in der format">>
             ],
-            
+            issuerList => [
+                <<"base64 encoded certificate in der format">>
+            ],
+            revocationList => [
+                <<"base64 encoded certificate in der format">>
+            ]
         },
         limits => #{
             maxSecureChannels => ,
@@ -99,10 +102,11 @@ Server Example
             maxNodesPerRead => ,
             maxNodesPerWrite => 
         }
-    }.
+    }
 
 
-
+Server Example
+-----
     {ok, Port} = eopcua_server:start_link(<<"my_server">>).
 
     ok = eopcua_server:server_start(Port, #{
