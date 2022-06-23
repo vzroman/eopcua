@@ -7,8 +7,8 @@ PROJECT ?= $(notdir $(BASEDIR))
 PROJECT := $(strip $(PROJECT))
 
 BUILD ?= $(BASEDIR)/_build
-ifeq ("$(wildcard $(BASEDIR))", "")
-	BUILD ?= $(abspath $(BASEDIR)/../../..)
+ifeq "$(wildcard $(BUILD) )" ""
+	BUILD := $(abspath $(BASEDIR)/../../..)
 endif
 
 # eport_c and cJSON libraries
