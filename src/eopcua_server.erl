@@ -36,7 +36,8 @@
     write_items/2, write_items/3,
     write_item/2, write_item/3,
     read_items/2, read_items/3,
-    read_item/2, read_item/3
+    read_item/2, read_item/3,
+    create_certificate/1
 ]).
 
 
@@ -172,6 +173,32 @@ read_item(PID, Item, Timeout)->
         {ok, <<"ok">>} -> ok;
         Error -> Error
     end.
+
+create_certificate( Name )->
+    Priv = code:priv_dir(eopcua),
+    Key = Priv++"/eopcua.pem",
+    Cert = Priv++"/eopcua.der",
+
+    Cmd =
+        "openssl req -new -x509  -config "++
+        Priv++"/cert/example.cert.config -newkey rsa:2048 -keyout "++
+        Key++" -nodes -outform der "++
+        "-subj '/CN="++unicode:characters_to_list(Name)++"' "++
+        "-out "++Cert,
+
+    Out = os:cmd( Cmd ),
+
+    Result =
+        case { file:read_file(Key), file:read_file(Cert) } of
+            { {ok, KeyData}, {ok, CertData} }->
+                {ok, #{ key => KeyData, certificate => CertData } };
+            _->
+                {error, { Cmd, Out }}
+        end,
+    file:delete(Key),
+    file:delete(Cert),
+
+    Result.
 
 
 
