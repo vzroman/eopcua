@@ -74,11 +74,11 @@ Server Config
             },
         ],
         description => #{
-            productName => <<"Faceplate OPCUA Server">>,
-            productUri => <<"http://faceplate.io">>,
-            manufacturerName => <<"Faceplate">>,
+            productName => <<"My OPCUA Server">>,
+            productUri => <<"http://mysite.com">>,
+            manufacturerName => <<"Me">>,
             softwareVersion => <<"0.0.1">>,
-            applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>
+            applicationUri => <<"urn:mysite.com:MyApplication:OPCUA:Server">> % It must be the same as in the certificate
             
         },
         encryption => #{
