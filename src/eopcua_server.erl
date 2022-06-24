@@ -89,7 +89,7 @@ set_log_level(PID, Level)->
 %       softwareVersion => <<"0.0.1">>,
 %       applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>
 %   },
-%   encription => #{
+%   encryption => #{
 %       certificate => <<"base64 encoded certificate in der format">>,
 %       private_key => <<"base64 encoded private key in pem format">>,
 %       trustList => [
@@ -117,7 +117,7 @@ server_start(PID, Params)->
 %       #{path => <<"TAGS/my_folder/pressure">>, type => <<"UInt32">>, value => 87},
 %   ]
 write_items(PID, Items)->
-    write_items(PID,Items,?RESPONSE_TIMEOUT).
+    write_items(PID, Items, undefined).
 write_items(PID, Items, Timeout)->
     case eport_c:request( PID, <<"write_items">>, Items, Timeout ) of
         {ok, Results}->
@@ -135,7 +135,7 @@ write_items(PID, Items, Timeout)->
 % Item:
 %   #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 45.67}
 write_item(PID, Item)->
-    write_item(PID,Item,?RESPONSE_TIMEOUT).
+    write_item(PID, Item, undefined).
 write_item(PID, Item, Timeout)->
     case eport_c:request( PID, <<"write_item">>, Item, Timeout ) of
         {ok, <<"ok">>} -> ok;
@@ -148,7 +148,7 @@ write_item(PID, Item, Timeout)->
 %       <<"TAGS/my_folder/pressure">>
 %   ]
 read_items(PID, Items)->
-    read_items(PID,Items,?RESPONSE_TIMEOUT).
+    read_items(PID, Items, undefined).
 read_items(PID, Items, Timeout)->
     case eport_c:request( PID, <<"read_items">>, Items, Timeout ) of
         {ok, Results}->
@@ -166,7 +166,7 @@ read_items(PID, Items, Timeout)->
 % Item:
 %   <<"TAGS/my_folder/temperature">>
 read_item(PID, Item)->
-    read_item(PID,Item,?RESPONSE_TIMEOUT).
+    read_item(PID, Item, undefined).
 read_item(PID, Item, Timeout)->
     case eport_c:request( PID, <<"read_item">>, Item, Timeout ) of
         {ok, <<"ok">>} -> ok;

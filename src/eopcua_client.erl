@@ -79,7 +79,7 @@ set_log_level(PID, Level)->
 %%	Protocol API
 %%==============================================================================
 browse_servers(PID, Params)->
-    browse_servers(PID, Params,?RESPONSE_TIMEOUT).
+    browse_servers(PID, Params, undefined).
 browse_servers(PID, Params, Timeout)->
     eport_c:request( PID, <<"browse_servers">>, Params, Timeout ).
 
@@ -100,7 +100,7 @@ connect(PID, Params, Timeout)->
     end.
 
 read_items(PID, Items)->
-    read_items(PID,Items,?RESPONSE_TIMEOUT).
+    read_items(PID, Items, undefined).
 read_items(PID, Items, Timeout) when is_map( Items )->
     Items1 = maps:to_list( Items ),
     case read_items( PID, Items1, Timeout ) of
@@ -125,12 +125,12 @@ read_items(PID, Items, Timeout)->
     end.
 
 read_item(PID, Item)->
-    read_item(PID,Item,?RESPONSE_TIMEOUT).
+    read_item(PID, Item, undefined).
 read_item(PID, Item, Timeout)->
     eport_c:request( PID, <<"read_item">>, Item, Timeout ).
 
 write_items(PID, Items)->
-    write_items(PID,Items,?RESPONSE_TIMEOUT).
+    write_items(PID, Items, undefined).
 write_items(PID, Items, Timeout)->
     Items1 =
         [ [ I, V] || {I, V} <- maps:to_list( Items )],
@@ -149,7 +149,7 @@ write_items(PID, Items, Timeout)->
 
 
 write_item(PID, Item, Value)->
-    write_item(PID,Item, Value,?RESPONSE_TIMEOUT).
+    write_item(PID, Item, Value, undefined).
 write_item(PID, Item, Value, Timeout)->
     case eport_c:request( PID, <<"write_item">>, [Item,Value], Timeout ) of
         {ok, <<"ok">>} -> ok;
@@ -157,12 +157,12 @@ write_item(PID, Item, Value, Timeout)->
     end.
 
 browse_folder(PID, Path)->
-    browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
+    browse_folder(PID, Path, undefined).
 browse_folder(PID, Path, Timeout)->
     eport_c:request( PID, <<"browse_folder">>, Path, Timeout ).  
 
 items_tree(PID)->
-    items_tree(PID, ?RESPONSE_TIMEOUT).
+    items_tree(PID, undefined).
 items_tree(PID, Timeout)->
     try
         {ok, items_tree(PID,Timeout,_Path = <<>>)}

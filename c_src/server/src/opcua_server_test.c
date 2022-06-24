@@ -63,10 +63,10 @@ int test_server_start(void){
     UA_Int16 port = 4840;
 
 
-    // No encription
+    // No encryption
     // UA_ServerConfig_setDefault(config);
 
-    // encription
+    // encryption
     UA_ByteString certificate = loadFile("eopcua.cert.der");
     UA_ByteString privateKey = loadFile("eopcua.key.pem");
     if (certificate.length == 0){

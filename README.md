@@ -81,7 +81,7 @@ Server Config
             applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>
             
         },
-        encription => #{
+        encryption => #{
             certificate => <<"base64 encoded certificate in der format">>,
             private_key => <<"base64 encoded private key in pem format">>,
             trustList => [

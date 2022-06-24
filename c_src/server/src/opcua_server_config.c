@@ -20,7 +20,7 @@
 #include "opcua_server_config.h"
 
 // local functions
-char *configure_encription(UA_ServerConfig *config, UA_Int16 port, cJSON* encription);
+char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryption);
 char *configure_users(UA_ServerConfig *config, cJSON* users);
 char *configure_description(UA_ServerConfig *config, cJSON* description);
 char *configure_limits(UA_ServerConfig *config, cJSON* limits);
@@ -38,14 +38,14 @@ char *configure(UA_ServerConfig *config, cJSON* args){
         ua_port = (UA_Int16) port->valuedouble;
     }
 
-    cJSON *encription = cJSON_GetObjectItemCaseSensitive(args, "encription");
-    if (cJSON_IsObject( encription )){
+    cJSON *encryption = cJSON_GetObjectItemCaseSensitive(args, "encryption");
+    if (cJSON_IsObject( encryption )){
         // Encrypted
-        error = configure_encription(config, ua_port, encription);
+        error = configure_encryption(config, ua_port, encryption);
         if (error) goto on_error;
 
     }else{
-        // No encription
+        // No encryption
         sc = UA_ServerConfig_setMinimal(config, ua_port, NULL);
         if (sc != UA_STATUSCODE_GOOD){
             error = (char *)UA_StatusCode_name( sc );
@@ -85,7 +85,7 @@ on_error:
     return error;
 }
 
-char *configure_encription(UA_ServerConfig *config, UA_Int16 port, cJSON* encription){
+char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryption){
     char *error = NULL;
     UA_StatusCode sc;
 
@@ -102,7 +102,7 @@ char *configure_encription(UA_ServerConfig *config, UA_Int16 port, cJSON* encrip
     size_t ua_revocationListSize = 0;
 
     // certificate
-    cJSON *certificate = cJSON_GetObjectItemCaseSensitive(encription, "certificate");
+    cJSON *certificate = cJSON_GetObjectItemCaseSensitive(encryption, "certificate");
     if (!cJSON_IsString(certificate) || (certificate->valuestring == NULL)){
         error = "server certificate is not defined";
         // It is a secure connection, the key must be provided
@@ -115,7 +115,7 @@ char *configure_encription(UA_ServerConfig *config, UA_Int16 port, cJSON* encrip
     }
 
     // private key
-    cJSON *privateKey = cJSON_GetObjectItemCaseSensitive(encription, "private_key");
+    cJSON *privateKey = cJSON_GetObjectItemCaseSensitive(encryption, "private_key");
     if (!cJSON_IsString(privateKey) || (privateKey->valuestring == NULL)){
         error = "private key is not defined";
         goto on_error; 
@@ -126,21 +126,21 @@ char *configure_encription(UA_ServerConfig *config, UA_Int16 port, cJSON* encrip
         goto on_error;
     }
 
-    cJSON *trustList = cJSON_GetObjectItemCaseSensitive(encription, "trustList");
+    cJSON *trustList = cJSON_GetObjectItemCaseSensitive(encryption, "trustList");
     if ( cJSON_IsArray(trustList) && cJSON_GetArraySize( trustList ) > 0 ) {
         error = base64_files(trustList, &ua_trustList);
         if (error) goto on_error;
         ua_trustListSize = cJSON_GetArraySize( trustList );
     }
 
-    cJSON *issuerList = cJSON_GetObjectItemCaseSensitive(encription, "issuerList");
+    cJSON *issuerList = cJSON_GetObjectItemCaseSensitive(encryption, "issuerList");
     if ( cJSON_IsArray(issuerList) && cJSON_GetArraySize( issuerList ) > 0 ) {
         error = base64_files(issuerList, &ua_issuerList);
         if (error) goto on_error;
         ua_issuerListSize = cJSON_GetArraySize( issuerList );
     }
 
-    cJSON *revocationList = cJSON_GetObjectItemCaseSensitive(encription, "revocationList");
+    cJSON *revocationList = cJSON_GetObjectItemCaseSensitive(encryption, "revocationList");
     if ( cJSON_IsArray(revocationList) && cJSON_GetArraySize( revocationList ) > 0 ) {
         error = base64_files(revocationList, &ua_revocationList);
         if (error) goto on_error;
