@@ -49,7 +49,6 @@
 
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
--define(NO_ACTIVITY_TIMEOUT,300000). % 5 min
 
 -define(FOLDER_TYPE,1).
 -define(TAG_TYPE,2).
