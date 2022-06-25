@@ -289,7 +289,7 @@ char* parse_certificate_uri(const UA_ByteString *certificate, char **error){
         goto on_error;
     }
     memcpy(URI, &bptr->data[URIStart], URIStop - URIStart);
-    URI[URIStop] = '\0';
+    URI[URIStop - URIStart] = '\0';
 
     BIO_free(ext_bio);
     X509_free(cert);
@@ -418,7 +418,7 @@ on_error:
 
 const UA_DataType *type2ua(const char *type ){
 
-    if( strcmp(type,"Bool") == 0 ){
+    if( strcmp(type,"Boolean") == 0 ){
         return &UA_TYPES[UA_TYPES_BOOLEAN];
     }else if( strcmp(type,"SByte") == 0 ){
         return &UA_TYPES[UA_TYPES_SBYTE];
