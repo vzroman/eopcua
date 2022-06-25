@@ -218,15 +218,18 @@ UA_ByteString loadFile(const char* path){
     return fileContents;
 }
 
-char* parse_certificate_uri(UA_ByteString *certificate, char **error){
+char* parse_certificate_uri(const UA_ByteString *certificate, char **error){
     X509 *cert = NULL;
     X509_EXTENSION *ex = NULL;
     BIO *ext_bio = NULL;
     BUF_MEM *bptr = NULL;
     char *URI = NULL;
 
+    const unsigned char * certData = (unsigned char *)certificate->data;
+    size_t certLength = certificate->length;
+
     // Parse the certificate
-    cert = d2i_X509(NULL, (const unsigned char **)&certificate->data, certificate->length);
+    cert = d2i_X509(NULL, &certData, certLength);
     if (!cert) {
         *error = "unable to parse certificate in memory";
         goto on_error;

@@ -54,10 +54,10 @@ Client Secured Connection
     
     // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
     
-    {ok,<<"ok">>} = eopcua_client:connect(Port, #{ 
+    ok = eopcua_client:connect(Port, #{ 
         url => <<"opc.tcp://localhost:53530/OPCUA/SimulationServer">>,
-        certificate => <base64 encoded certificate in der format>,
-        private_key => <base64 encoded private key in pem format>
+        certificate => base64:encode(Cert),     % Certificated in der format
+        private_key => base64:encode(Key),      % Private key in pem format
         login => <<"test_user">>, 
         password => <<"111111">> 
     }).

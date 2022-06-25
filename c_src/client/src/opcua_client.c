@@ -305,7 +305,7 @@ cJSON* opcua_client_connect(cJSON* args, char **error){
         }
 
         // Parse the application URI from the certificate
-        appURI = parse_certificate_uri( cert, error );   
+        appURI = parse_certificate_uri( cert, error );
         if (appURI == NULL){
             goto on_error;
         } 
