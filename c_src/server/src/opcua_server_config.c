@@ -43,7 +43,6 @@ char *configure(UA_ServerConfig *config, cJSON* args){
         // Encrypted
         error = configure_encryption(config, ua_port, encryption);
         if (error) goto on_error;
-
     }else{
         // No encryption
         sc = UA_ServerConfig_setMinimal(config, ua_port, NULL);
@@ -147,6 +146,7 @@ char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryp
         ua_revocationListSize = cJSON_GetArraySize( revocationList );
     }
 
+    config->serverCertificate = *ua_certificate;
     sc = UA_ServerConfig_setDefaultWithSecurityPolicies(config, port,
                                                        ua_certificate, ua_privateKey,
                                                        ua_trustList, ua_trustListSize,
@@ -260,9 +260,18 @@ char *configure_description(UA_ServerConfig *config, cJSON* description){
         config->buildInfo.softwareVersion = UA_STRING_ALLOC(softwareVersion->valuestring);
     }
 
-    cJSON *applicationUri = cJSON_GetObjectItemCaseSensitive(description, "applicationUri");
-    if (cJSON_IsString(applicationUri) && (applicationUri->valuestring != NULL)){
-        config->applicationDescription.applicationUri = UA_STRING_ALLOC(applicationUri->valuestring);
+    if (config->serverCertificate.length){
+        char *appURI = parse_certificate_uri( &config->serverCertificate, &error );
+        if (appURI != NULL){
+            config->applicationDescription.applicationUri = UA_STRING_ALLOC( appURI );
+            free( appURI );
+        } 
+    }else{
+        // If no certificate provided take he application URI from the provided args
+        cJSON *applicationUri = cJSON_GetObjectItemCaseSensitive(description, "applicationUri");
+        if (cJSON_IsString(applicationUri) && (applicationUri->valuestring != NULL)){
+            config->applicationDescription.applicationUri = UA_STRING_ALLOC(applicationUri->valuestring);
+        }
     }
 
     return error;

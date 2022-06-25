@@ -43,7 +43,7 @@ Client Example
     eopcua_client:stop(Port).
     
     
-Client Secured Connection
+Client Encrypted Connection
 -----
     // Generate certificate
     openssl req -new -x509  -config priv/cert/example.cert.config -newkey rsa:2048 -keyout priv/eopcua.pem -nodes -outform der -out priv/eopcua.der
@@ -51,6 +51,8 @@ Client Secured Connection
     OR
     
     {ok, #{ key := Key, certificate := Cert } } = eopcua_client:create_certificate(<<"my.connection">>).
+
+    {ok, Port} = eopcua_client:start_link(<<"my_connection">>).
     
     // ATTENTION! The certificate shuld be added as trusted to the OPC UA server
     
@@ -78,7 +80,7 @@ Server Config
             productUri => <<"http://mysite.com">>,
             manufacturerName => <<"Me">>,
             softwareVersion => <<"0.0.1">>,
-            applicationUri => <<"urn:mysite.com:MyApplication:OPCUA:Server">> % It must be the same as in the certificate
+            applicationUri => <<"urn:mysite.com:MyApplication:OPCUA:Server">>
             
         },
         encryption => #{
@@ -111,7 +113,7 @@ Server Example
 
     ok = eopcua_server:server_start(Port, #{
         host => <<"localhost">>,
-        port => 4842,
+        port => 4841,
         users => [
             #{
                 login => <<"BuyMeBeer">>,
@@ -119,11 +121,11 @@ Server Example
             }
         ],
         description => #{
-            productName => <<"Faceplate OPCUA Server">>,
-            productUri => <<"http://faceplate.io">>,
-            manufacturerName => <<"Faceplate">>,
+            productName => <<"My OPCUA Server">>,
+            productUri => <<"http://mysite.com">>,
+            manufacturerName => <<"Me">>,
             softwareVersion => <<"0.0.1">>,
-            applicationUri => <<"urn:faceplate.io:Faceplate:OPCUA:Server">>
+            applicationUri => <<"urn:mysite.com:MyApplication:OPCUA:Server">>
         }
     }).
     
@@ -146,6 +148,35 @@ Server Example
         <<"TAGS/my_folder/temperature">>,
         <<"TAGS/my_folder/pressure">>
     ]).
+
+    ok = eopcua_server:set_log_level(Port, debug).  #; trace, debug, info, warning, error, fatal
+
+Server Encrypted Connection
+-----
+    // Generate certificate
+    {ok, #{ key := Key, certificate := Cert } } = eopcua_server:create_certificate(<<"my.server">>).
+
+    {ok, Port} = eopcua_server:start_link(<<"my_server_with_encryption">>).
     
+    ok = eopcua_server:server_start(Port, #{
+        host => <<"localhost">>,
+        port => 4842,
+        users => [
+            #{
+                login => <<"BuyMeBeer">>,
+                password => <<"please">>
+            }
+        ],
+        encryption => #{
+            certificate => base64:encode(Cert),     % Certificated in der format
+            private_key => base64:encode(Key)       % Private key in pem format
+        },
+        description => #{
+            productName => <<"My OPCUA Server">>,
+            productUri => <<"http://mysite.com">>,
+            manufacturerName => <<"Me">>,
+            softwareVersion => <<"0.0.1">>
+        }
+    }).
     
     
