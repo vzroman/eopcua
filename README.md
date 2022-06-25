@@ -2,9 +2,25 @@ eopcua
 =====
 
 OPC UA driver for Erlang based on open62541 library (https://github.com/open62541/open62541).
-Currently only client is supported.
+Server and client is supported. Currently, the functionality is limited to reading and writing simple (scalar) types:
+    * Boolean
+    * SByte
+    * Byte
+    * Int16
+    * UInt16
+    * Int32
+    * UInt32
+    * Int64
+    * UInt64
+    * Float
+    * Double
+    * String
+
+I tried to keep API is as simple as possible.
 
 Examples were written for Prosys OPC UA Simulation Server (https://www.prosysopc.com/products/opc-ua-simulation-server/)
+
+I appreciate any pull requests for bug fixing or extending the functionality. 
 
 Build
 -----
