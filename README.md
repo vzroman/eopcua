@@ -85,12 +85,15 @@ Server Config
     #{
         host => <<"mynode">>,
         port => 4840,
-        users => [
-            #{
-                login => <<"ByMeBeer">>,
-                password => <<"please">>
-            },
-        ],
+        access => #{
+            enable_anonymous => false,
+            users => [
+                #{
+                    login => <<"BuyMeBeer">>,
+                    password => <<"please">>
+                },
+            ]
+        },
         description => #{
             productName => <<"My OPCUA Server">>,
             productUri => <<"http://mysite.com">>,
@@ -100,6 +103,7 @@ Server Config
             
         },
         encryption => #{
+            enable_unencrypted => false,
             certificate => <<"base64 encoded certificate in der format">>,
             private_key => <<"base64 encoded private key in pem format">>,
             trustList => [
@@ -130,12 +134,15 @@ Server Example
     ok = eopcua_server:server_start(Port, #{
         host => <<"localhost">>,
         port => 4841,
-        users => [
-            #{
-                login => <<"BuyMeBeer">>,
-                password => <<"please">>
-            }
-        ],
+        access => #{
+            enable_anonymous => true,
+            users => [
+                #{
+                    login => <<"BuyMeBeer">>,
+                    password => <<"please">>
+                }
+            ]
+        },
         description => #{
             productName => <<"My OPCUA Server">>,
             productUri => <<"http://mysite.com">>,
@@ -177,13 +184,17 @@ Server Encrypted Connection
     ok = eopcua_server:server_start(Port, #{
         host => <<"localhost">>,
         port => 4842,
-        users => [
-            #{
-                login => <<"BuyMeBeer">>,
-                password => <<"please">>
-            }
-        ],
+        access => #{
+            enable_anonymous => false,
+            users => [
+                #{
+                    login => <<"BuyMeBeer">>,
+                    password => <<"please">>
+                }
+            ]
+        },
         encryption => #{
+            enable_unencrypted => false,
             certificate => base64:encode(Cert),     % Certificated in der format
             private_key => base64:encode(Key)       % Private key in pem format
         },

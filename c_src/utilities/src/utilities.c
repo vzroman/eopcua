@@ -397,7 +397,7 @@ UA_Variant *json2ua(const UA_DataType *type, cJSON *value){
             goto on_error;
         }
     }else if(type == &UA_TYPES[UA_TYPES_BOOLEAN] && isNumber){
-        UA_Boolean v = (value->valuedouble != 0) ;
+        UA_Boolean v = (value->valueint != 0) ;
         if ( UA_Variant_setScalarCopy( result, &v, &UA_TYPES[UA_TYPES_BOOLEAN]) != UA_STATUSCODE_GOOD) {
             goto on_error;
         }

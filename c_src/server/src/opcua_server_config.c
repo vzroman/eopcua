@@ -21,9 +21,12 @@
 
 // local functions
 char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryption);
-char *configure_users(UA_ServerConfig *config, cJSON* users);
+char *configure_access(UA_ServerConfig *config, cJSON* access);
 char *configure_description(UA_ServerConfig *config, cJSON* description);
 char *configure_limits(UA_ServerConfig *config, cJSON* limits);
+
+static void disableAnonymous(UA_ServerConfig *config);
+static void disableUnencrypted(UA_ServerConfig *config);
 
 // The entry point
 char *configure(UA_ServerConfig *config, cJSON* args){
@@ -52,9 +55,9 @@ char *configure(UA_ServerConfig *config, cJSON* args){
         }
     }
 
-    cJSON *users = cJSON_GetObjectItemCaseSensitive(args, "users");
-    if ( cJSON_IsArray(users) && cJSON_GetArraySize( users ) > 0 ) {
-        error = configure_users(config, users);
+    cJSON *access = cJSON_GetObjectItemCaseSensitive(args, "access");
+    if ( cJSON_IsObject(access) ) {
+        error = configure_access(config, access);
         if (error) goto on_error;
     }
 
@@ -125,6 +128,8 @@ char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryp
         goto on_error;
     }
 
+    cJSON *enableUnencrypted = cJSON_GetObjectItemCaseSensitive(encryption, "enable_unencrypted");
+
     cJSON *trustList = cJSON_GetObjectItemCaseSensitive(encryption, "trustList");
     if ( cJSON_IsArray(trustList) && cJSON_GetArraySize( trustList ) > 0 ) {
         error = base64_files(trustList, &ua_trustList);
@@ -152,9 +157,17 @@ char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryp
                                                        ua_trustList, ua_trustListSize,
                                                        ua_issuerList, ua_issuerListSize,
                                                        ua_revocationList, ua_revocationListSize);
+
     if (sc != UA_STATUSCODE_GOOD){
         error = (char *)UA_StatusCode_name( sc );
         goto on_error;
+    }
+
+    if (cJSON_IsBool(enableUnencrypted) && (enableUnencrypted->valueint != 0)){
+        LOGWARNING("unencrypted connections allowed");
+    }else{
+        LOGINFO("disable unencrypted connections");
+        disableUnencrypted( config );
     }
 
     return error;
@@ -170,12 +183,28 @@ on_error:
 
 }
 
-char *configure_users(UA_ServerConfig *config, cJSON* users){
+char *configure_access(UA_ServerConfig *config, cJSON* access){
     char *error = NULL;
     UA_StatusCode sc;
-    size_t count = cJSON_GetArraySize( users );
 
-    UA_UsernamePasswordLogin *ua_users = (UA_UsernamePasswordLogin*)
+    cJSON *users = cJSON_GetObjectItemCaseSensitive(access, "users");
+    cJSON *enableAnonymous = cJSON_GetObjectItemCaseSensitive(access, "enable_anonymous");
+    UA_UsernamePasswordLogin *ua_users = NULL;
+
+    bool _enableAnonymous = cJSON_IsBool( enableAnonymous ) && (enableAnonymous->valueint != 0);
+
+    if (!cJSON_IsArray(users) && !_enableAnonymous) {
+        error = "users are not configured";
+        goto on_error;
+    }
+
+    size_t count = cJSON_GetArraySize( users );
+    if (count == 0 && !enableAnonymous){
+        error = "no users are configured";
+        goto on_error;
+    }
+
+    ua_users = (UA_UsernamePasswordLogin*)
         UA_malloc(count * sizeof(UA_UsernamePasswordLogin));
     
     if(!ua_users) {
@@ -220,12 +249,19 @@ char *configure_users(UA_ServerConfig *config, cJSON* users){
 
     // Update the config
     config->accessControl.clear(&config->accessControl);
-    sc = UA_AccessControl_default(config, false, NULL,
+    sc = UA_AccessControl_default(config, _enableAnonymous, NULL,
              &config->securityPolicies[config->securityPoliciesSize-1].policyUri, count, ua_users);
     
     if (sc != UA_STATUSCODE_GOOD){
         error = (char *)UA_StatusCode_name( sc );
         goto on_error;
+    }
+
+    if (_enableAnonymous){
+        LOGWARNING("anonymous access allowed");
+    }else{
+        LOGINFO("disable anonymous access");
+        disableAnonymous( config );
     }
 
     return error; 
@@ -312,4 +348,51 @@ char *configure_limits(UA_ServerConfig *config, cJSON* limits){
 
 
     return error;
+}
+
+static void disableAnonymous(UA_ServerConfig *config) {
+    for(size_t i = 0; i < config->endpointsSize; i++) {
+        UA_EndpointDescription *ep = &config->endpoints[i];
+
+        for(size_t j = 0; j < ep->userIdentityTokensSize; j++) {
+            UA_UserTokenPolicy *utp = &ep->userIdentityTokens[j];
+            if(utp->tokenType != UA_USERTOKENTYPE_ANONYMOUS)
+                continue;
+
+            UA_UserTokenPolicy_clear(utp);
+            /* Move the last to this position */
+            if(j + 1 < ep->userIdentityTokensSize) {
+                ep->userIdentityTokens[j] = ep->userIdentityTokens[ep->userIdentityTokensSize-1];
+                j--;
+            }
+            ep->userIdentityTokensSize--;
+        }
+
+        /* Delete the entire array if the last UserTokenPolicy was removed */
+        if(ep->userIdentityTokensSize == 0) {
+            UA_free(ep->userIdentityTokens);
+            ep->userIdentityTokens = NULL;
+        }
+    }
+}
+
+static void disableUnencrypted(UA_ServerConfig *config) {
+    for(size_t i = 0; i < config->endpointsSize; i++) {
+        UA_EndpointDescription *ep = &config->endpoints[i];
+        if(ep->securityMode != UA_MESSAGESECURITYMODE_NONE)
+            continue;
+
+        UA_EndpointDescription_clear(ep);
+        /* Move the last to this position */
+        if(i + 1 < config->endpointsSize) {
+            config->endpoints[i] = config->endpoints[config->endpointsSize-1];
+            i--;
+        }
+        config->endpointsSize--;
+    }
+    /* Delete the entire array if the last Endpoint was removed */
+    if(config->endpointsSize== 0) {
+        UA_free(config->endpoints);
+        config->endpoints = NULL;
+    }
 }
