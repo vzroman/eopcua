@@ -116,7 +116,7 @@ Server Config
             maxSecureChannels => ,
             maxSecurityTokenLifetime => , % in ms
             maxSessions => ,
-            maxSessionTimeout => ,
+            maxSessionTimeout => , % in ms
             maxNodesPerRead => ,
             maxNodesPerWrite => 
         }
