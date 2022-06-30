@@ -218,20 +218,5 @@ create_certificate( Name )->
 
     Result.
 
-test()->
-    {ok,Port} = eopcua_client:start_link(<<"my_connection">>),
-
-    {ok, Cert} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.der"),
-    {ok, Key} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.pem"),
-
-    {ok,<<"ok">>} = eopcua_client:connect(Port, #{
-        host=> <<"localhost">>, 
-        port => 53530, endpoint => <<"OPCUA/SimulationServer">>, 
-        login => <<"test_user">>, 
-        password => <<"111111">>, 
-        certificate=> base64:encode(Cert), 
-        private_key=> base64:encode( Key)
-    }).
-
 
 
