@@ -43,10 +43,6 @@
     create_certificate/1
 ]).
 
--export([
-    test/0
-]).
-
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
 
