@@ -27,6 +27,8 @@ typedef struct {
 typedef struct {
   int id;
   UA_Variant *value;
+  UA_StatusCode status;
+  UA_DataType *type;
   UA_NodeId nodeId;
   UT_hash_handle hh;
 } opcua_client_subscription;
