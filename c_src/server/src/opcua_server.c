@@ -53,6 +53,7 @@ cJSON* opcua_server_read_item(cJSON* args, char **error);
 opcua_server_mapping *opcua_server_map = NULL;
 
 //---------server thread entry point------
+pthread_mutex_t lock;
 static void *server_thread(void* arg);
 // The RUN flag
 static volatile UA_Boolean opcua_server_running = false;
@@ -407,6 +408,9 @@ char *create_variable(char *path, char *type, UA_NodeId *node) {
     free(name);
     name = NULL;
 
+    // open62541 is not thread safe, we use mutex
+    pthread_mutex_lock(&lock); 
+
     sc = UA_Server_addVariableNode(opcua_server, 
         UA_NODEID_NULL, 
         folder, 
@@ -417,6 +421,9 @@ char *create_variable(char *path, char *type, UA_NodeId *node) {
         NULL, 
         node);
     
+    // release the lock
+    pthread_mutex_unlock(&lock);
+
     if (sc != UA_STATUSCODE_GOOD){
         error = (char*)UA_StatusCode_name( sc );
         goto on_error;
@@ -493,6 +500,9 @@ char *create_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeId
     attr.displayName = UA_LOCALIZEDTEXT("en-US", (char *)name);
     UA_QualifiedName qname = UA_QUALIFIEDNAME(1, (char *)name);
 
+    // open62541 is not thread safe, we use mutex
+    pthread_mutex_lock(&lock);
+
     sc = UA_Server_addObjectNode(
         opcua_server, 
         UA_NODEID_NULL,
@@ -503,6 +513,9 @@ char *create_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeId
         attr, 
         NULL, 
         nodeId);
+
+    // release the lock
+    pthread_mutex_unlock(&lock);
 
     if (sc != UA_STATUSCODE_GOOD){
         error = (char*)UA_StatusCode_name( sc );
@@ -518,15 +531,38 @@ static void *server_thread(void *arg) {
 
     // The returns only when the server shuts down
     opcua_server_running = true;
-    UA_StatusCode retval = UA_Server_run(opcua_server, &opcua_server_running);
+
+    UA_Boolean waitInternal = false;
+
+    UA_StatusCode sc = UA_Server_run_startup( opcua_server );
+    if(sc != UA_STATUSCODE_GOOD)
+        goto on_clean;
+
+    while( opcua_server_running ) {
+
+        // get the lock
+        pthread_mutex_lock(&lock);
+
+        UA_UInt16 timeout = UA_Server_run_iterate(opcua_server, waitInternal);
+
+        // release the lock
+        pthread_mutex_unlock(&lock);
+
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = timeout * 1000;
+        select(0, NULL, NULL, NULL, &tv);
+    }
+    sc = UA_Server_run_shutdown( opcua_server );
 
     // Clean up
+on_clean:
     UA_Server_delete(opcua_server);
     opcua_server = NULL;
     opcua_server_running = true;
 
-    char *status = (char *)UA_StatusCode_name( retval );
-    if (retval != UA_STATUSCODE_GOOD){
+    char *status = (char *)UA_StatusCode_name( sc );
+    if (sc != UA_STATUSCODE_GOOD){
         LOGERROR("unable to start server, status %s", status);
     }
 
@@ -549,8 +585,16 @@ int main(int argc, char *argv[]) {
     OpenSSL_add_all_algorithms();
     ERR_load_BIO_strings();
 
+    // As the open62541 is not thread safe we use mutex
+    if (pthread_mutex_init(&lock, NULL) != 0) {
+        LOGINFO("mutex init has failed");
+        exit(EXIT_FAILURE);
+    }
+
     LOGINFO("enter eport_loop");
     eport_loop( &on_request );
+
+    pthread_mutex_destroy(&lock);
 
     return EXIT_SUCCESS;
 }
