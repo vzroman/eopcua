@@ -38,7 +38,7 @@
     read_item/2,read_item/3,
     write_items/2,write_items/3,
     write_item/3,write_item/4,
-    browse_folder/2,browse_folder/3,
+    browse_folder/4,browse_folder/5,
     items_tree/1,items_tree/2,
     create_certificate/1
 ]).
@@ -152,10 +152,15 @@ write_item(PID, Item, Value, Timeout)->
         Error -> Error
     end.
 
-browse_folder(PID, Path)->
-    browse_folder(PID, Path, undefined).
-browse_folder(PID, Path, Timeout)->
-    eport_c:request( PID, <<"browse_folder">>, Path, Timeout ).  
+browse_folder(PID, Path, Offset, Limit)->
+    browse_folder(PID, Path, Offset, Limit, undefined).
+browse_folder(PID, Path, Offset, Limit, Timeout)->
+    Args = #{
+        path => Path,
+        offset => Offset,
+        limit => Limit
+    },
+    eport_c:request( PID, <<"browse_folder">>, Args, Timeout ).
 
 items_tree(PID)->
     items_tree(PID, undefined).
@@ -166,7 +171,7 @@ items_tree(PID, Timeout)->
         _:Error-> {error, Error}
     end.
 items_tree(PID,Timeout,Path)->
-    case browse_folder(PID,Path,Timeout) of
+    case browse_folder(PID,Path, _Offset = undefined, _Limit = undefined, Timeout) of
         {ok,Items}->
             maps:fold(fun(Name,Item,Acc)->
                 ItemPath =
