@@ -39,7 +39,7 @@ case "$1" in
         cd open62541
         mkdir -p build
         cd build
-        cmake -DCMAKE_INSTALL_PREFIX=_install -DUA_ENABLE_ENCRYPTION=On -DUA_ENABLE_ENCRYPTION_OPENSSL=On -DUA_BUILD_SELFSIGNED_CERTIFICATE=On .. 
+        cmake -DCMAKE_INSTALL_PREFIX=_install -DUA_ENABLE_ENCRYPTION=On -DUA_ENABLE_ENCRYPTION_OPENSSL=On -DUA_BUILD_SELFSIGNED_CERTIFICATE=On -DUA_MULTITHREADING=199 .. 
         make && make install
 
         # uthash

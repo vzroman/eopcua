@@ -472,7 +472,7 @@ char *find_in_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeI
         error = (char*)UA_StatusCode_name( result.statusCode );
     }
 
-    UA_BrowsePathResult_clear( &result );
+    UA_BrowsePathResult_delete( &result );
     return error;
 }
 

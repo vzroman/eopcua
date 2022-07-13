@@ -370,10 +370,10 @@ on_error:
         free(appURI);
     }
     if (cert!= NULL){
-        UA_ByteString_clear( cert );
+        UA_ByteString_delete( cert );
     }
     if (key!= NULL){
-        UA_ByteString_clear( key );
+        UA_ByteString_delete( key );
     }
     cJSON_Delete( response );
     return NULL;
@@ -579,7 +579,7 @@ cJSON* opcua_client_browse_folder(cJSON* args, char **error){
 
     if (ua_response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
         *error = (char*)UA_StatusCode_name( ua_response.responseHeader.serviceResult );
-        UA_BrowseResponse_clear(&ua_response);
+        UA_BrowseResponse_delete(&ua_response);
         goto on_error;
     }
     
@@ -597,13 +597,13 @@ cJSON* opcua_client_browse_folder(cJSON* args, char **error){
             free(name);
             if (temp == NULL) {
                 *error = "unable to add a node to the result";
-                UA_BrowseResponse_clear(&ua_response);
+                UA_BrowseResponse_delete(&ua_response);
                 goto on_error; 
             }
         }
     }
 
-    UA_BrowseResponse_clear(&ua_response);
+    UA_BrowseResponse_delete(&ua_response);
 
     return response;
 
@@ -749,7 +749,7 @@ char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId){
         }
         if (found){ break; }
     }
-    UA_BrowseResponse_clear(&response);
+    UA_BrowseResponse_delete(&response);
     if (!found){
         return "node not found";
     }
@@ -757,10 +757,132 @@ char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId){
     return NULL;
 
 on_error:
-    UA_BrowseResponse_clear(&response);
+    UA_BrowseResponse_delete(&response);
     return error;
 
 }
+
+// UA_ReferenceDescription **browse_folder(UA_NodeId folder, u_int from, u_int max, char *error){
+    
+//     UA_ReferenceDescription **result = NULL;
+//     UA_StatusCode sc;
+
+//     // Build the request
+//     UA_BrowseRequest request;
+//     UA_BrowseRequest_init(&request);
+
+//     UA_BrowseResponse response;
+//     UA_BrowseResponse_init(&response);
+
+//     UA_BrowseNextRequest nextRequest;
+//     UA_BrowseNextRequest_init(&nextRequest);
+
+//     UA_BrowseNextResponse nextResponse;
+//     UA_BrowseNextResponse_init(&nextResponse);
+
+//     // The batches by 500 items
+//     const u_int maxPerRequest = 500; 
+
+//     // Configure the request
+//     request.requestedMaxReferencesPerNode = maxPerRequest;    
+//     request.nodesToBrowse = UA_BrowseDescription_new();
+//     request.nodesToBrowseSize = 1;
+//     request.nodesToBrowse[0].nodeId = folder; 
+//     request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_DISPLAYNAME | UA_BROWSERESULTMASK_NODECLASS;
+
+//     response = UA_Client_Service_browse(opcua_client, request);
+
+//     if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+//         *error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
+//         goto on_clear;
+//     }
+
+//     u_int count = 0;
+//     for(size_t i = 0; i < response.resultsSize; ++i) {
+//         count += response.results[i].referencesSize;
+//     }
+
+//     u_int length = count >= from 
+//         ? (count - from)  
+//         : 0;
+    
+//     length = max && (length > max) 
+//         ? max
+//         : length; 
+
+//     // Allocate the result
+//     result = (char*)malloc( (length + 1) * sizeof(UA_ReferenceDescription *) );
+//     if (!result){
+//         *error = "out of memory";
+//         goto on_clear;
+//     }
+
+//     u_int ii = 0;
+//     for(size_t i = 0; i < response.resultsSize; ++i) {
+//         for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
+//             if (++ii < from) continue;
+            
+//             // Add a copy of the reference
+//             sc = UA_ReferenceDescriыption_copy(&(response.results[i].references[j]), *(result + ii -1));
+
+//             if (sc != UA_STATUSCODE_GOOD){
+//                 *error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
+//                 goto on_clear;
+//             }
+
+//             if (max && (ii - from) > max) goto on_clear;
+//         }
+//     }
+
+//     // There are no more nodes to browse
+//     if ( count < maxPerRequest ) goto on_clear;
+
+//     // Load step by step other nodes
+//     from = from > count ? from - count : 0;
+//     max = max  ? max - length : max;
+
+//     UA_ByteString *continuation = &response.results[0].continuationPoint;
+//     for(;;){
+//         UA_BrowseNextRequest_clear(&nextRequest);
+
+//         nextRequest.releaseContinuationPoints = UA_FALSE;
+//         nextRequest.continuationPoints = continuation;
+//         nextRequest.continuationPointsSize = 1;
+
+//         nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+
+//         if (nextResponse.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+//             *error = (char*)UA_StatusCode_name( nextResponse.responseHeader.serviceResult );
+//             goto on_clear;
+//         }
+
+//         count = 0;
+//         for(size_t i = 0; i < nextResponse.resultsSize; ++i) {
+//             count += nextResponse.results[i].referencesSize;
+//         }
+//     }
+
+
+// on_clear:
+//     UA_BrowseRequest_delete(&request);
+//     UA_BrowseResponse_delete(&response);
+
+//     UA_BrowseNextRequest_delete(&nextRequest);
+//     UA_BrowseNextResponse_delete(&nextResponse);
+
+//     if (*error) goto on_error;
+
+//     return result;
+
+// on_error:
+//     if (result){
+//         for (int i = 0; *(result + i); i++){
+//             UA_ReferenceDescription_delete(*(result + i));
+//         }
+//         free(result);
+//     }
+//     return NULL;
+// }
 
 UA_BrowseResponse browse_folder(UA_NodeId folder){
     // Build the request
@@ -774,7 +896,7 @@ UA_BrowseResponse browse_folder(UA_NodeId folder){
 
     // Execute the request
     UA_BrowseResponse response = UA_Client_Service_browse(opcua_client, request);
-    UA_BrowseRequest_clear(&request);
+    UA_BrowseRequest_delete(&request);
     return response;
 }
 
@@ -901,7 +1023,7 @@ void purge_bindings(){
     for (s = opcua_client_subscriptions; s != NULL; s = s->hh.next) {
         HASH_DEL(opcua_client_subscriptions, s);
         UA_Variant_delete(s->value);
-        UA_NodeId_clear( &s->nodeId );
+        UA_NodeId_delete( &s->nodeId );
         free( s );
     }
     opcua_client_subscriptions = NULL;
