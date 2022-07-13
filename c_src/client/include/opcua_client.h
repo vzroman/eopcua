@@ -32,3 +32,10 @@ typedef struct {
   UA_NodeId nodeId;
   UT_hash_handle hh;
 } opcua_client_subscription;
+
+typedef struct {
+  UA_ReferenceDescription *array;
+  size_t step;
+  size_t used;
+  size_t size;
+} RefArray;

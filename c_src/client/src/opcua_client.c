@@ -48,8 +48,13 @@ cJSON* opcua_client_browse_folder(cJSON* args, char **error);
 opcua_client_subscription *find_binding(char *path, char **error);
 char *path2nodeId( char *path, UA_NodeId *nodeId );
 char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId);
-UA_BrowseResponse browse_folder(UA_NodeId folder);
+RefArray browse_folder(UA_NodeId folder, u_int offset, u_int limit, char **error);
 char *replace_host(char *URL, char *host);
+
+char *initRefArray(RefArray *a, size_t initialSize);
+char *insertRefArray(RefArray *a, UA_ReferenceDescription element);
+void freeRefArray(RefArray *a);
+
 
 //--------------update thread loop-----------------------------
 const char *init_update_loop(void);
@@ -564,46 +569,57 @@ cJSON* opcua_client_browse_folder(cJSON* args, char **error){
         goto on_error;
     }
 
-    if (!cJSON_IsString(args) || (args->valuestring == NULL)){
-        *error = "folder is not defined";
-        goto on_error; 
+    if (!cJSON_IsObject(args)){
+        *error = "invalid arguments format";
+        goto on_error;
+    }
+
+    char *path = "";
+    cJSON *_path = cJSON_GetObjectItemCaseSensitive(args, "path");
+    if (cJSON_IsString(_path) && (_path->valuestring != NULL)){
+        path = _path->valuestring;
+    }
+
+    u_int offset = 0;
+    cJSON *_offset = cJSON_GetObjectItemCaseSensitive(args, "offset");
+    if (cJSON_IsNumber(_offset)){
+        offset = _offset->valueint;
+    }
+
+    u_int limit = 0;
+    cJSON *_limit = cJSON_GetObjectItemCaseSensitive(args, "limit");
+    if (cJSON_IsNumber(_limit)){
+        limit = _limit->valueint;
     }
 
     UA_NodeId nodeId;
-    *error = path2nodeId( args->valuestring, &nodeId );
+    *error = path2nodeId( path, &nodeId );
     if (*error != NULL){
         goto on_error;
     }
 
-    UA_BrowseResponse ua_response = browse_folder( nodeId );
-
-    if (ua_response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        *error = (char*)UA_StatusCode_name( ua_response.responseHeader.serviceResult );
-        UA_BrowseResponse_delete(&ua_response);
-        goto on_error;
-    }
+    RefArray items = browse_folder( nodeId, offset, limit, error );
+    if (!items.array) goto on_error;
     
     // Build the result
     response = cJSON_CreateObject();
-    for(size_t i = 0; i < ua_response.resultsSize; ++i) {
-        for(size_t j = 0; j < ua_response.results[i].referencesSize; ++j) {
+    for(size_t i = 0; i < items.used; ++i) {
 
-            UA_ReferenceDescription *ref = &(ua_response.results[i].references[j]);
+        UA_ReferenceDescription *ref = &items.array[i];
             
-            // Some name can contain '/', it causes the path to be improperly interpretted.
-            // We replace them with "\"
-            char * name = str_replace( (char *)ref->displayName.text.data, "/", "\\" );
-            cJSON *temp = cJSON_AddNumberToObject(response, name, ref->nodeClass);
-            free(name);
-            if (temp == NULL) {
-                *error = "unable to add a node to the result";
-                UA_BrowseResponse_delete(&ua_response);
-                goto on_error; 
-            }
+        // Some name can contain '/', it causes the path to be improperly interpretted.
+        // We replace them with "\"
+        char * name = str_replace( (char *)ref->displayName.text.data, "/", "\\" );
+        cJSON *temp = cJSON_AddNumberToObject(response, name, ref->nodeClass);
+        free(name);
+        if (temp == NULL) {
+            freeRefArray(&items);
+            *error = "unable to add a node to the result";
+            goto on_error; 
         }
     }
 
-    UA_BrowseResponse_delete(&ua_response);
+    freeRefArray(&items);
 
     return response;
 
@@ -727,29 +743,24 @@ char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId){
     char *error = NULL;
     UA_StatusCode sc;
 
-    UA_BrowseResponse response = browse_folder( folder );
-    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
-        goto on_error;
-    }
+    RefArray items = browse_folder( folder, 0, 0, &error );
+    if (!items.array) goto on_error;
 
     bool found = false;
-    for(size_t i = 0; i < response.resultsSize; ++i) {
-        for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
-
-            UA_ReferenceDescription *ref = &(response.results[i].references[j]);
-            if (strcmp((char *)ref->displayName.text.data, name) == 0){
-                sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeId);
-                if (sc != UA_STATUSCODE_GOOD){
-                    error = (char*)UA_StatusCode_name( sc );
-                }
-                found = true;
-                break;
+    for(size_t i = 0; i < items.used; ++i) {
+        UA_ReferenceDescription *ref = &(items.array[i]);
+        if (strcmp((char *)ref->displayName.text.data, name) == 0){
+            sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeId);
+            if (sc != UA_STATUSCODE_GOOD){
+                error = (char*)UA_StatusCode_name( sc );
+                goto on_error;
             }
+            found = true;
+            break;
         }
-        if (found){ break; }
     }
-    UA_BrowseResponse_delete(&response);
+    freeRefArray(&items);
+
     if (!found){
         return "node not found";
     }
@@ -757,147 +768,182 @@ char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId){
     return NULL;
 
 on_error:
-    UA_BrowseResponse_delete(&response);
+    freeRefArray(&items);
     return error;
 
 }
 
-// UA_ReferenceDescription **browse_folder(UA_NodeId folder, u_int from, u_int max, char *error){
+//-----------------browse folder utilities-------------------------------
+char *initRefArray(RefArray *a, size_t initialSize) {
+    a->array = malloc(initialSize * sizeof(UA_ReferenceDescription));
+    if (!a->array) return "out of memory";
+    a->step = initialSize;
+    a->size = initialSize;
+    a->used = 0;
+    return NULL;
+}
+
+char *insertRefArray(RefArray *a, UA_ReferenceDescription element) {
+    if (a->used >= a->size) {
+        a->size += a->step;
+        a->array = realloc(a->array, a->size * sizeof(UA_ReferenceDescription));
+        if (!a->array) return "out of memory";
+    }
+
+    UA_StatusCode sc = UA_ReferenceDescription_copy(&element, &a->array[a->used++]);
+    if (sc != UA_STATUSCODE_GOOD) return (char*)UA_StatusCode_name( sc );
+
+    return NULL;
+}
+
+void freeRefArray(RefArray *a){
+    for (int i = 0; i < a->used; i++){
+        UA_ReferenceDescription_clear(&a->array[i]);
+    }
+    free(a->array);
+    a->array = NULL;
+    a->size = 0;
+    a->used = 0;
+}
+
+RefArray browse_folder(UA_NodeId folder, u_int offset, u_int limit, char **error){
     
-//     UA_ReferenceDescription **result = NULL;
-//     UA_StatusCode sc;
+    RefArray result;
 
-//     // Build the request
-//     UA_BrowseRequest request;
-//     UA_BrowseRequest_init(&request);
-
-//     UA_BrowseResponse response;
-//     UA_BrowseResponse_init(&response);
-
-//     UA_BrowseNextRequest nextRequest;
-//     UA_BrowseNextRequest_init(&nextRequest);
-
-//     UA_BrowseNextResponse nextResponse;
-//     UA_BrowseNextResponse_init(&nextResponse);
-
-//     // The batches by 500 items
-//     const u_int maxPerRequest = 500; 
-
-//     // Configure the request
-//     request.requestedMaxReferencesPerNode = maxPerRequest;    
-//     request.nodesToBrowse = UA_BrowseDescription_new();
-//     request.nodesToBrowseSize = 1;
-//     request.nodesToBrowse[0].nodeId = folder; 
-//     request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_DISPLAYNAME | UA_BROWSERESULTMASK_NODECLASS;
-
-//     response = UA_Client_Service_browse(opcua_client, request);
-
-//     if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-//         *error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
-//         goto on_clear;
-//     }
-
-//     u_int count = 0;
-//     for(size_t i = 0; i < response.resultsSize; ++i) {
-//         count += response.results[i].referencesSize;
-//     }
-
-//     u_int length = count >= from 
-//         ? (count - from)  
-//         : 0;
-    
-//     length = max && (length > max) 
-//         ? max
-//         : length; 
-
-//     // Allocate the result
-//     result = (char*)malloc( (length + 1) * sizeof(UA_ReferenceDescription *) );
-//     if (!result){
-//         *error = "out of memory";
-//         goto on_clear;
-//     }
-
-//     u_int ii = 0;
-//     for(size_t i = 0; i < response.resultsSize; ++i) {
-//         for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
-//             if (++ii < from) continue;
-            
-//             // Add a copy of the reference
-//             sc = UA_ReferenceDescriыption_copy(&(response.results[i].references[j]), *(result + ii -1));
-
-//             if (sc != UA_STATUSCODE_GOOD){
-//                 *error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
-//                 goto on_clear;
-//             }
-
-//             if (max && (ii - from) > max) goto on_clear;
-//         }
-//     }
-
-//     // There are no more nodes to browse
-//     if ( count < maxPerRequest ) goto on_clear;
-
-//     // Load step by step other nodes
-//     from = from > count ? from - count : 0;
-//     max = max  ? max - length : max;
-
-//     UA_ByteString *continuation = &response.results[0].continuationPoint;
-//     for(;;){
-//         UA_BrowseNextRequest_clear(&nextRequest);
-
-//         nextRequest.releaseContinuationPoints = UA_FALSE;
-//         nextRequest.continuationPoints = continuation;
-//         nextRequest.continuationPointsSize = 1;
-
-//         nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
-
-//         if (nextResponse.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-//             *error = (char*)UA_StatusCode_name( nextResponse.responseHeader.serviceResult );
-//             goto on_clear;
-//         }
-
-//         count = 0;
-//         for(size_t i = 0; i < nextResponse.resultsSize; ++i) {
-//             count += nextResponse.results[i].referencesSize;
-//         }
-//     }
-
-
-// on_clear:
-//     UA_BrowseRequest_delete(&request);
-//     UA_BrowseResponse_delete(&response);
-
-//     UA_BrowseNextRequest_delete(&nextRequest);
-//     UA_BrowseNextResponse_delete(&nextResponse);
-
-//     if (*error) goto on_error;
-
-//     return result;
-
-// on_error:
-//     if (result){
-//         for (int i = 0; *(result + i); i++){
-//             UA_ReferenceDescription_delete(*(result + i));
-//         }
-//         free(result);
-//     }
-//     return NULL;
-// }
-
-UA_BrowseResponse browse_folder(UA_NodeId folder){
     // Build the request
     UA_BrowseRequest request;
     UA_BrowseRequest_init(&request);
-    request.requestedMaxReferencesPerNode = 0;
+
+    UA_BrowseResponse response;
+    UA_BrowseResponse_init(&response);
+
+    UA_BrowseNextRequest nextRequest;
+    UA_BrowseNextRequest_init(&nextRequest);
+
+    UA_BrowseNextResponse nextResponse;
+    UA_BrowseNextResponse_init(&nextResponse);
+
+    UA_ByteString continuation;
+    UA_ByteString_init(&continuation);
+
+    // The batches by 500 items
+    const u_int maxPerRequest = 500; 
+    *error = initRefArray(&result, maxPerRequest);
+    if (*error) goto on_clear;
+
+    // Configure the request
+    request.requestedMaxReferencesPerNode = maxPerRequest;    
     request.nodesToBrowse = UA_BrowseDescription_new();
     request.nodesToBrowseSize = 1;
     request.nodesToBrowse[0].nodeId = folder; 
-    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_ALL;
+    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_DISPLAYNAME | UA_BROWSERESULTMASK_NODECLASS;
 
-    // Execute the request
-    UA_BrowseResponse response = UA_Client_Service_browse(opcua_client, request);
-    UA_BrowseRequest_delete(&request);
-    return response;
+    response = UA_Client_Service_browse(opcua_client, request);
+
+    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+        *error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
+        goto on_clear;
+    }
+
+    // The iterator
+    u_int iter = 0;
+
+    u_int count = 0;
+    for(size_t i = 0; i < response.resultsSize; ++i) {
+        for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
+            count++;
+
+            // Take only folders and variables
+            if(response.results[i].references[j].nodeClass != UA_NODECLASS_OBJECT 
+                && response.results[i].references[j].nodeClass != UA_NODECLASS_VARIABLE)
+                continue;
+
+            if (++iter <= offset) continue;
+            
+            // Add a copy of the reference
+            *error = insertRefArray(&result, response.results[i].references[j]);
+            if (*error) goto on_clear;
+
+            if (limit && result.used >= limit) goto on_clear;
+        }
+    }
+
+    // There are no more nodes to browse
+    if ( count < maxPerRequest ) goto on_clear;
+
+    // Load step by step other nodes
+    nextRequest.continuationPointsSize=0;
+    UA_ByteString_copy(&response.results[0].continuationPoint, &continuation);
+    for(;;){
+        nextRequest.continuationPoints = NULL;
+        nextRequest.continuationPointsSize = 0;
+        UA_BrowseNextRequest_clear(&nextRequest);
+        UA_BrowseNextResponse_clear(&nextResponse);
+
+        nextRequest.releaseContinuationPoints = UA_FALSE;
+        nextRequest.continuationPoints = &continuation;
+        nextRequest.continuationPointsSize=1 ;
+
+        nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+
+        if (nextResponse.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( nextResponse.responseHeader.serviceResult );
+            goto on_clear;
+        }
+
+        count = 0;
+        for(size_t i = 0; i < nextResponse.resultsSize; ++i) {
+            for(size_t j = 0; j < nextResponse.results[i].referencesSize; ++j) {
+                count++;
+
+                // Take only folders and variables
+                if(nextResponse.results[i].references[j].nodeClass != UA_NODECLASS_OBJECT 
+                    && nextResponse.results[i].references[j].nodeClass != UA_NODECLASS_VARIABLE)
+                    continue;
+
+                if (++iter <= offset) continue;
+                // Add a copy of the reference
+                *error = insertRefArray(&result, nextResponse.results[i].references[j]);
+                if (*error) goto on_clear;
+
+                if (limit && result.used >= limit) goto on_clear;
+            }
+        }
+        // No more results
+        if (count < maxPerRequest) goto on_clear;
+        UA_ByteString_clear(&continuation);
+        UA_ByteString_copy(&nextResponse.results[0].continuationPoint, &continuation);
+    }
+
+
+on_clear:
+    // The procedure is taken from:
+    //      open62541/tests/client/check_client_highlevel.c
+
+    // Release continuation points
+    UA_BrowseNextResponse_clear(&nextResponse);
+    nextRequest.releaseContinuationPoints = UA_TRUE;
+    nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+    UA_BrowseNextResponse_clear(&nextResponse);
+
+    // Clear the main request/response
+    UA_BrowseRequest_clear(&request);
+    UA_BrowseResponse_clear(&response);
+
+    // Clear the nextRequest
+    nextRequest.continuationPoints = NULL;
+    nextRequest.continuationPointsSize = 0;
+    UA_BrowseNextRequest_clear(&nextRequest);
+
+    UA_ByteString_clear(&continuation);
+
+    if (*error) goto on_error;
+
+    return result;
+
+on_error:
+    freeRefArray(&result);
+    return result;
 }
 
 char *replace_host(char *URL, char *host){

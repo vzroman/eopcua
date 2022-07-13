@@ -36,7 +36,7 @@ Client Example
     
     ok = eopcua_client:connect(Port, #{ url => hd(ServerList) }).
     
-    {ok,SubItems} = eopcua_client:browse_folder(Port, <<"StaticData/AnalogItems">> ).
+    {ok,SubItems} = eopcua_client:browse_folder(Port, <<"StaticData/AnalogItems">>, undefined, undefined ).
     
     {ok,Tree} = eopcua_client:items_tree(Port ).
     
