@@ -743,34 +743,130 @@ char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId){
     char *error = NULL;
     UA_StatusCode sc;
 
-    RefArray items = browse_folder( folder, 0, 0, &error );
-    if (!items.array) goto on_error;
+    // Build the request
+    UA_BrowseRequest request;
+    UA_BrowseRequest_init(&request);
 
-    bool found = false;
-    for(size_t i = 0; i < items.used; ++i) {
-        UA_ReferenceDescription *ref = &(items.array[i]);
-        if (strcmp((char *)ref->displayName.text.data, name) == 0){
-            sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeId);
-            if (sc != UA_STATUSCODE_GOOD){
-                error = (char*)UA_StatusCode_name( sc );
-                goto on_error;
+    UA_BrowseResponse response;
+    UA_BrowseResponse_init(&response);
+
+    UA_BrowseNextRequest nextRequest;
+    UA_BrowseNextRequest_init(&nextRequest);
+
+    UA_BrowseNextResponse nextResponse;
+    UA_BrowseNextResponse_init(&nextResponse);
+
+    UA_ByteString continuation;
+    UA_ByteString_init(&continuation);
+
+    // The batches by 500 items
+    const u_int maxPerRequest = 500;
+
+    // Configure the request
+    request.requestedMaxReferencesPerNode = maxPerRequest;    
+    request.nodesToBrowse = UA_BrowseDescription_new();
+    request.nodesToBrowseSize = 1;
+    request.nodesToBrowse[0].nodeId = folder; 
+    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_DISPLAYNAME;
+
+    response = UA_Client_Service_browse(opcua_client, request);
+
+    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+        error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
+        goto on_clear;
+    }
+
+    u_int count = 0;
+    for(size_t i = 0; i < response.resultsSize; ++i) {
+        for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
+            count++;
+            
+            UA_ReferenceDescription *ref = &response.results[i].references[j];
+
+            if (strcmp((char *)ref->displayName.text.data, name) == 0){
+                sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeId);
+                if (sc != UA_STATUSCODE_GOOD){
+                    error = (char*)UA_StatusCode_name( sc );
+                }
+                goto on_clear;
             }
-            found = true;
-            break;
         }
     }
-    freeRefArray(&items);
 
-    if (!found){
-        return "node not found";
+    // There are no more nodes to browse
+    if ( count < maxPerRequest ) {
+        error = "node not found";
+        goto on_clear;
     }
 
-    return NULL;
+    // Load step by step other nodes
+    nextRequest.continuationPointsSize=0;
+    UA_ByteString_copy(&response.results[0].continuationPoint, &continuation);
+    for(;;){
+        nextRequest.continuationPoints = NULL;
+        nextRequest.continuationPointsSize = 0;
+        UA_BrowseNextRequest_clear(&nextRequest);
+        UA_BrowseNextResponse_clear(&nextResponse);
 
-on_error:
-    freeRefArray(&items);
+        nextRequest.releaseContinuationPoints = UA_FALSE;
+        nextRequest.continuationPoints = &continuation;
+        nextRequest.continuationPointsSize=1 ;
+
+        nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+
+        if (nextResponse.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+            error = (char*)UA_StatusCode_name( nextResponse.responseHeader.serviceResult );
+            goto on_clear;
+        }
+
+        count = 0;
+        for(size_t i = 0; i < nextResponse.resultsSize; ++i) {
+            for(size_t j = 0; j < nextResponse.results[i].referencesSize; ++j) {
+                count++;
+
+                UA_ReferenceDescription *ref = &nextResponse.results[i].references[j];
+
+                if (strcmp((char *)ref->displayName.text.data, name) == 0){
+                    sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeId);
+                    if (sc != UA_STATUSCODE_GOOD){
+                        error = (char*)UA_StatusCode_name( sc );
+                    }
+                    goto on_clear;
+                }
+            }
+        }
+        // No more results
+        if (count < maxPerRequest) {
+            error = "node not found";
+            goto on_clear;
+        }
+        UA_ByteString_clear(&continuation);
+        UA_ByteString_copy(&nextResponse.results[0].continuationPoint, &continuation);
+    }
+
+
+on_clear:
+    // The procedure is taken from:
+    //      open62541/tests/client/check_client_highlevel.c
+
+    // Release continuation points
+    UA_BrowseNextResponse_clear(&nextResponse);
+    nextRequest.releaseContinuationPoints = UA_TRUE;
+    nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+    UA_BrowseNextResponse_clear(&nextResponse);
+
+    // Clear the main request/response
+    UA_BrowseRequest_clear(&request);
+    UA_BrowseResponse_clear(&response);
+
+    // Clear the nextRequest
+    nextRequest.continuationPoints = NULL;
+    nextRequest.continuationPointsSize = 0;
+    UA_BrowseNextRequest_clear(&nextRequest);
+
+    UA_ByteString_clear(&continuation);
+
     return error;
-
 }
 
 //-----------------browse folder utilities-------------------------------
