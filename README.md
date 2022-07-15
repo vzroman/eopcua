@@ -36,6 +36,9 @@ Client Example
     
     ok = eopcua_client:connect(Port, #{ url => hd(ServerList) }).
     
+    % Or use cached version for better performance
+    %ok = eopcua_client:connect(Port, #{ url => hd(ServerList), cache => true }).
+    
     {ok,SubItems} = eopcua_client:browse_folder(Port, <<"StaticData/AnalogItems">>, undefined, undefined ).
 
     {ok,SearchResultTree} = eopcua_client:find_recursive(Port, <<"StaticData">>, <<"Analog">> ).

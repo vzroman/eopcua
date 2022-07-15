@@ -51,6 +51,7 @@ char *path2nodeId( char *path, UA_NodeId *nodeId );
 char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId);
 RefArray browse_folder(UA_NodeId folder, u_int offset, u_int limit, char **error);
 char *find_recursive(UA_NodeId folder, char *search, cJSON *result);
+char *build_browse_cache(UA_NodeId folder, char *context);
 char *replace_host(char *URL, char *host);
 
 char *initRefArray(RefArray *a, size_t initialSize);
@@ -65,17 +66,12 @@ const char *opcua_client_update_subscriptions(void);
 static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
                          UA_UInt32 monId, void *monContext, UA_DataValue *value);
 UA_StatusCode get_connection_state( UA_Client *client );
-void purge_bindings(void);
 
 // Global variables
 UA_Client *opcua_client = NULL;
 UA_UInt32 subscriptionId;
 int update_interval = 100000; // 100 ms
 pthread_mutex_t lock;
-
-// Subscription indexes
-opcua_client_binding *opcua_client_bindings = NULL;
-opcua_client_subscription *opcua_client_subscriptions = NULL;
 
 cJSON* on_request( char *method, cJSON *args, char **error ){
     
@@ -230,7 +226,8 @@ on_error:
 //         "privateKey": "<base64 encoded pem>",
 //         "login":"user1",
 //         "password":"secret",
-//         "update_cycle":200
+//         "update_cycle":200,
+//         "cache": true
 //     }
 cJSON* opcua_client_connect(cJSON* args, char **error){
     cJSON *response = NULL;
@@ -359,6 +356,13 @@ cJSON* opcua_client_connect(cJSON* args, char **error){
     if(sc != UA_STATUSCODE_GOOD) {
         *error = (char*)UA_StatusCode_name( sc );
         goto on_error;
+    }
+
+    cJSON *cache = cJSON_GetObjectItemCaseSensitive(args, "cache");
+    if (cJSON_IsBool(cache) && cache->valueint){
+        LOGINFO("build browse cache");
+        *error = build_browse_cache(UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), "");
+        if (*error) goto on_error;
     }
 
     *error = (char *)init_update_loop();
@@ -687,11 +691,10 @@ on_error:
 opcua_client_subscription *find_binding(char *path, char **error){
 
     // Lookup the binding in the collection
-    opcua_client_binding *b = NULL;
-    opcua_client_subscription *s = NULL;
-    HASH_FIND_STR(opcua_client_bindings, path, b);
+    opcua_client_subscription *s = find_subscription(path, error);
+    if (*error) goto on_error;
 
-    if (b == NULL){
+    if (!s){
         // The binding is not in the collection yet.
         // Create a new subscription.
         LOGINFO("create a new subscription %s",path);
@@ -703,8 +706,15 @@ opcua_client_subscription *find_binding(char *path, char **error){
             goto on_error;
         }
 
+        UA_NodeId nodeIdCopy;
+        UA_StatusCode sc = UA_NodeId_copy( &nodeId, &nodeIdCopy);
+        if (sc != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( sc );
+            goto on_error;
+        }
+
         UA_NodeId typeId;
-        UA_StatusCode sc = UA_Client_readDataTypeAttribute(opcua_client, nodeId, &typeId);
+        sc = UA_Client_readDataTypeAttribute(opcua_client, nodeId, &typeId);
         if (sc != UA_STATUSCODE_GOOD){
             *error = (char*)UA_StatusCode_name( sc );
             goto on_error;
@@ -719,44 +729,27 @@ opcua_client_subscription *find_binding(char *path, char **error){
         UA_Client_MonitoredItems_createDataChange(opcua_client, subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
                                                 monRequest, NULL, on_subscription_update, NULL);
 
-        if(monResponse.statusCode != UA_STATUSCODE_GOOD){
-            *error = (char*)UA_StatusCode_name( monResponse.statusCode );
+        sc = monResponse.statusCode;
+        int monId = monResponse.monitoredItemId;
+
+        UA_MonitoredItemCreateRequest_clear(&monRequest);
+        UA_MonitoredItemCreateResult_clear(&monResponse);
+
+        if(sc != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( sc );
             goto on_error;
         }
 
-        LOGDEBUG("monResponse.monitoredItemId %d", monResponse.monitoredItemId);
-
-        // Add the binding to the collection
-        b = (opcua_client_binding *)malloc(sizeof *b);
-        if (b == NULL){
-            *error = "unable to allocate the memory for a new binding index";
-            goto on_error;
-        }
-        b->path = strdup( path );
-        b->id = monResponse.monitoredItemId;
-
-        s = (opcua_client_subscription *)malloc(sizeof *s);
-        if (s == NULL){
-            *error = "unable to allocate the memory for new binding";
-            goto on_error;
-        }
-        s->id = monResponse.monitoredItemId;
-        s->nodeId = nodeId;
-        s->value = nodeValue;
-        s->status = nodeStatus;
-        s->type = (UA_DataType *)&UA_TYPES[typeId.identifier.numeric - 1];
-        
-        HASH_ADD_STR(opcua_client_bindings, path, b);
-        HASH_ADD_INT(opcua_client_subscriptions, id, s);
-        
-    }else{
-        HASH_FIND_INT(opcua_client_subscriptions, &b->id, s);
-        if (s == NULL){
-            *error = "invalid subscription index";
-            goto on_error;
-        }
+        s = add_subscription(path, 
+            monId, 
+            &nodeIdCopy, 
+            nodeValue, 
+            nodeStatus, 
+            (UA_DataType *)&UA_TYPES[typeId.identifier.numeric - 1],
+            error
+        );
     }
-
+    
     return s;
 
 on_error:
@@ -766,6 +759,14 @@ on_error:
 char *path2nodeId( char *path, UA_NodeId *nodeId ){
     char *error = NULL;
 
+    // Cached version
+    UA_NodeId *cached = lookup_cache( path );
+    if (cached){
+        *nodeId = *cached;
+        return NULL;
+    }
+
+    LOGTRACE("%s not in the cache, perform search", path);
     char **tokens = str_split( path, '/');
     // start from the root folder
     *nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
@@ -1111,6 +1112,37 @@ on_clear:
     return error;
 }
 
+char *build_browse_cache(UA_NodeId folder, char *context){
+    char *error = NULL;
+
+    RefArray items = browse_folder(folder, 0, 0, &error);
+    if(error) goto on_clear;
+
+    for(size_t i = 0; i < items.used; ++i) {
+
+        UA_ReferenceDescription *ref = &items.array[i];
+
+        char * name = (char *)ref->displayName.text.data;
+
+        char path[strlen(context) + strlen(name) + 2];
+        sprintf(path,"%s/%s",context, name); 
+
+        error = add_cache(path, &ref->nodeId.nodeId );
+        if (error) goto on_clear; 
+
+        // Add children recursively
+        if(ref->nodeClass == UA_NODECLASS_OBJECT){
+            error = build_browse_cache( ref->nodeId.nodeId, path );
+            if (error) goto on_clear; 
+        }
+    }
+
+on_clear:
+    freeRefArray( &items );
+    return error;
+
+}
+
 char *replace_host(char *URL, char *host){
 
     // opc.tcp://fp-roman:53530/OPCUA/SimulationServer
@@ -1215,52 +1247,20 @@ static void *update_loop_thread(void *arg) {
         UA_Client_disconnect(opcua_client);
         UA_Client_delete(opcua_client);
         opcua_client = NULL;
-        purge_bindings();
+        purge_subscriptions();
+        purge_cache();
     }
 
     return NULL;
 }
 
-void purge_bindings(){
-    opcua_client_binding *b;
-    for (b = opcua_client_bindings; b != NULL; b = b->hh.next) {
-        HASH_DEL(opcua_client_bindings, b);
-        free( b->path );
-        free( b );
-    }
-    opcua_client_bindings = NULL;
-
-    opcua_client_subscription *s;
-    for (s = opcua_client_subscriptions; s != NULL; s = s->hh.next) {
-        HASH_DEL(opcua_client_subscriptions, s);
-        UA_Variant_delete(s->value);
-        UA_NodeId_delete( &s->nodeId );
-        free( s );
-    }
-    opcua_client_subscriptions = NULL;
-}
-
 static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
                          UA_UInt32 monId, void *monContext, UA_DataValue *value) {
 
-    // Lookup the subscription
-    opcua_client_subscription *s = NULL;
-    HASH_FIND_INT(opcua_client_subscriptions, &monId, s);
-    if (s != NULL){
-        // Update the value
-        LOGTRACE("update subscription %d",monId);
-        UA_StatusCode sc = UA_Variant_copy( &value->value, s->value );
-        if (UA_Variant_copy( &value->value, s->value ) != UA_STATUSCODE_GOOD){
-            LOGERROR("unable to copy value on subscription update %d",monId);
-        }
-        if ( value->status != UA_STATUSCODE_GOOD){
-            s->status = value->status;
-        }else{
-            s->status = sc;
-        }
-    }else{
-        LOGERROR("unable to update subscription %d",monId);
-    }
+    LOGTRACE("update subscription %d",monId);                         
+    char *error = update_subscription(monId, value);
+    if (error) LOGERROR("%s %d",error, monId);
+    
 }
 
 const char *opcua_client_update_subscriptions(){
