@@ -694,7 +694,7 @@ opcua_client_subscription *find_binding(char *path, char **error){
     if (b == NULL){
         // The binding is not in the collection yet.
         // Create a new subscription.
-        LOGDEBUG("create a new subscription");
+        LOGINFO("create a new subscription %s",path);
 
         // Get nodeId
         UA_NodeId nodeId;
