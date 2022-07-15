@@ -360,6 +360,7 @@ cJSON* opcua_client_connect(cJSON* args, char **error){
 
     cJSON *cache = cJSON_GetObjectItemCaseSensitive(args, "cache");
     if (cJSON_IsBool(cache) && cache->valueint){
+        LOGINFO("build browse cache");
         *error = build_browse_cache(UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), "");
         if (*error) goto on_error;
     }
@@ -693,7 +694,7 @@ opcua_client_subscription *find_binding(char *path, char **error){
     opcua_client_subscription *s = find_subscription(path, error);
     if (*error) goto on_error;
 
-    if (s == NULL){
+    if (!s){
         // The binding is not in the collection yet.
         // Create a new subscription.
         LOGINFO("create a new subscription %s",path);
@@ -705,8 +706,15 @@ opcua_client_subscription *find_binding(char *path, char **error){
             goto on_error;
         }
 
+        UA_NodeId nodeIdCopy;
+        UA_StatusCode sc = UA_NodeId_copy( &nodeId, &nodeIdCopy);
+        if (sc != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( sc );
+            goto on_error;
+        }
+
         UA_NodeId typeId;
-        UA_StatusCode sc = UA_Client_readDataTypeAttribute(opcua_client, nodeId, &typeId);
+        sc = UA_Client_readDataTypeAttribute(opcua_client, nodeId, &typeId);
         if (sc != UA_STATUSCODE_GOOD){
             *error = (char*)UA_StatusCode_name( sc );
             goto on_error;
@@ -734,7 +742,7 @@ opcua_client_subscription *find_binding(char *path, char **error){
 
         s = add_subscription(path, 
             monId, 
-            nodeId, 
+            &nodeIdCopy, 
             nodeValue, 
             nodeStatus, 
             (UA_DataType *)&UA_TYPES[typeId.identifier.numeric - 1],
@@ -1108,16 +1116,18 @@ char *build_browse_cache(UA_NodeId folder, char *context){
     char *error = NULL;
 
     RefArray items = browse_folder(folder, 0, 0, &error);
+    if(error) goto on_clear;
 
     for(size_t i = 0; i < items.used; ++i) {
 
         UA_ReferenceDescription *ref = &items.array[i];
 
         char * name = (char *)ref->displayName.text.data;
-        char path[strlen(context) + strlen(name) + 2];
-        sprintf("%s/%s",context, name); 
 
-        error = add_cache(path, ref->nodeId.nodeId );
+        char path[strlen(context) + strlen(name) + 2];
+        sprintf(path,"%s/%s",context, name); 
+
+        error = add_cache(path, &ref->nodeId.nodeId );
         if (error) goto on_clear; 
 
         // Add children recursively

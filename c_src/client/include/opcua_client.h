@@ -42,7 +42,7 @@ opcua_client_subscription *__subscriptions_index = NULL;
 static opcua_client_subscription *add_subscription(
     char *path, 
     int monId, 
-    UA_NodeId nodeId, 
+    UA_NodeId *nodeId, 
     UA_Variant *nodeValue, 
     UA_StatusCode nodeStatus, 
     UA_DataType *nodeType, 
@@ -51,7 +51,7 @@ static opcua_client_subscription *add_subscription(
     // Add the binding to the collection
     opcua_client_binding *b = NULL;
     opcua_client_subscription *s = NULL;
-    b = (opcua_client_binding *)malloc(sizeof *b);
+    b = (opcua_client_binding *)malloc(sizeof(opcua_client_binding));
     if (b == NULL){
         *error = "unable to allocate the memory for a new binding index";
         goto on_error;
@@ -59,16 +59,17 @@ static opcua_client_subscription *add_subscription(
     b->path = strdup( path );
     b->id = monId;
 
-    s = (opcua_client_subscription *)malloc(sizeof *s);
+    s = (opcua_client_subscription *)malloc(sizeof(opcua_client_subscription));
     if (s == NULL){
         *error = "unable to allocate the memory for new binding";
         goto on_error;
     }
-    UA_StatusCode sc = UA_NodeId_copy(&nodeId, &s->nodeId);
+    UA_StatusCode sc = UA_NodeId_copy(nodeId, &s->nodeId);
     if (sc != UA_STATUSCODE_GOOD){
         *error = (char*)UA_StatusCode_name( sc );
         goto on_error;
     }
+    //s->nodeId = nodeId;
     s->id = monId;
     s->value = nodeValue;
     s->status = nodeStatus;
@@ -151,7 +152,7 @@ typedef struct {
 
 opcua_client_cache *__browse_cache;
 
-static char *add_cache(char *path, UA_NodeId nodeId){
+static char *add_cache(char *path, UA_NodeId *nodeId){
     char *error = NULL;
     opcua_client_cache *c = (opcua_client_cache *)malloc( sizeof(opcua_client_cache) );
     if (!c){
@@ -159,7 +160,7 @@ static char *add_cache(char *path, UA_NodeId nodeId){
         goto on_error;
     }
     c->path = strdup(path);
-    UA_StatusCode sc = UA_NodeId_copy(&nodeId, &c->nodeId);
+    UA_StatusCode sc = UA_NodeId_copy(nodeId, &c->nodeId);
     if (sc != UA_STATUSCODE_GOOD){
         error = (char*)UA_StatusCode_name( sc );
         goto on_error;
