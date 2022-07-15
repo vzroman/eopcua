@@ -44,11 +44,13 @@ cJSON* opcua_client_write_item(cJSON* args, char **error);
 
 cJSON* opcua_client_browse_servers(cJSON* args, char **error);
 cJSON* opcua_client_browse_folder(cJSON* args, char **error);
+cJSON* opcua_client_find_recursive(cJSON* args, char **error);
 
 opcua_client_subscription *find_binding(char *path, char **error);
 char *path2nodeId( char *path, UA_NodeId *nodeId );
 char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId);
 RefArray browse_folder(UA_NodeId folder, u_int offset, u_int limit, char **error);
+char *find_recursive(UA_NodeId folder, char *search, cJSON *result);
 char *replace_host(char *URL, char *host);
 
 char *initRefArray(RefArray *a, size_t initialSize);
@@ -98,6 +100,8 @@ cJSON* on_request( char *method, cJSON *args, char **error ){
         response = opcua_client_write_item( args, error );
     }else if (strcmp(method, "browse_folder") == 0){
         response = opcua_client_browse_folder( args, error );
+    }else if (strcmp(method, "find_recursive") == 0){
+        response = opcua_client_find_recursive( args, error );
     } else{
         *error = "invalid method";
     }
@@ -618,8 +622,56 @@ cJSON* opcua_client_browse_folder(cJSON* args, char **error){
             goto on_error; 
         }
     }
-
     freeRefArray(&items);
+
+    return response;
+
+on_error:
+    cJSON_Delete( response );
+    return NULL;
+}
+
+cJSON* opcua_client_find_recursive(cJSON* args, char **error){
+    cJSON *response = NULL;
+
+    if (opcua_client == NULL){
+        *error = "no connection";
+        goto on_error;
+    }
+
+    if (!cJSON_IsObject(args)){
+        *error = "invalid arguments format";
+        goto on_error;
+    }
+
+    char *search = NULL;
+    cJSON *_search = cJSON_GetObjectItemCaseSensitive(args, "search");
+    if (!cJSON_IsString(_search) || (_search->valuestring == NULL)){
+        *error = "undefined search string";
+        goto on_error;
+    }
+    search = _search->valuestring;
+
+    char *context = "";
+    cJSON *_context = cJSON_GetObjectItemCaseSensitive(args, "context");
+    if (cJSON_IsString(_context) && (_context->valuestring != NULL)){
+        context = _context->valuestring;
+    }
+
+    UA_NodeId contextNodeId;
+    *error = path2nodeId( context, &contextNodeId );
+    if (*error != NULL){
+        goto on_error;
+    }
+
+    response = cJSON_CreateObject();
+    if (!response){
+        *error = "unable to create result set";
+        goto on_error;
+    }
+
+    *error = find_recursive(contextNodeId, search, response);
+    if (*error) goto on_error;
 
     return response;
 
@@ -870,38 +922,6 @@ on_clear:
 }
 
 //-----------------browse folder utilities-------------------------------
-char *initRefArray(RefArray *a, size_t initialSize) {
-    a->array = malloc(initialSize * sizeof(UA_ReferenceDescription));
-    if (!a->array) return "out of memory";
-    a->step = initialSize;
-    a->size = initialSize;
-    a->used = 0;
-    return NULL;
-}
-
-char *insertRefArray(RefArray *a, UA_ReferenceDescription element) {
-    if (a->used >= a->size) {
-        a->size += a->step;
-        a->array = realloc(a->array, a->size * sizeof(UA_ReferenceDescription));
-        if (!a->array) return "out of memory";
-    }
-
-    UA_StatusCode sc = UA_ReferenceDescription_copy(&element, &a->array[a->used++]);
-    if (sc != UA_STATUSCODE_GOOD) return (char*)UA_StatusCode_name( sc );
-
-    return NULL;
-}
-
-void freeRefArray(RefArray *a){
-    for (int i = 0; i < a->used; i++){
-        UA_ReferenceDescription_clear(&a->array[i]);
-    }
-    free(a->array);
-    a->array = NULL;
-    a->size = 0;
-    a->used = 0;
-}
-
 RefArray browse_folder(UA_NodeId folder, u_int offset, u_int limit, char **error){
     
     RefArray result;
@@ -1040,6 +1060,55 @@ on_clear:
 on_error:
     freeRefArray(&result);
     return result;
+}
+
+char *find_recursive(UA_NodeId folder, char *search, cJSON *result){
+    char *error = NULL;
+
+    RefArray items = browse_folder(folder, 0, 0, &error);
+
+    for(size_t i = 0; i < items.used; ++i) {
+
+        UA_ReferenceDescription *ref = &items.array[i];
+        char *name = (char *)ref->displayName.text.data;
+
+        if (strstr(name, search)){
+            // The node name contains the search
+            cJSON *temp = cJSON_AddNumberToObject(result, name, ref->nodeClass);
+            if (temp == NULL) {
+                error = "unable to add a node to the result";
+                goto on_clear; 
+            }
+        }else if(ref->nodeClass == UA_NODECLASS_OBJECT){
+            // There name does not match the search string but there might be nodes inside
+            cJSON *children = cJSON_CreateObject();
+            if (!children){
+                error = "out of memory";
+                goto on_clear;
+            }
+
+            error = find_recursive(ref->nodeId.nodeId, search, children );
+            if (error) {
+                cJSON_Delete( children );
+                goto on_clear;
+            }
+
+            // If the folder contains items that match the search we add it to the results
+            if (cJSON_GetArraySize( children )){
+                if (!cJSON_AddItemToObject(result, name, children)){
+                    error = "unable to add an item to the result";
+                    goto on_clear;
+                }
+            }else{
+                cJSON_Delete( children );
+            }
+        }
+
+    }
+
+on_clear:
+    freeRefArray( &items );
+    return error;
 }
 
 char *replace_host(char *URL, char *host){

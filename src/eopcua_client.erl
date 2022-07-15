@@ -40,6 +40,7 @@
     write_item/3,write_item/4,
     browse_folder/4,browse_folder/5,
     items_tree/1,items_tree/2,
+    find_recursive/3,find_recursive/4,
     create_certificate/1
 ]).
 
@@ -173,17 +174,17 @@ items_tree(PID, Timeout)->
 items_tree(PID,Timeout,Path)->
     case browse_folder(PID,Path, _Offset = undefined, _Limit = undefined, Timeout) of
         {ok,Items}->
+            PathPrefix =
+                if
+                    Path =:= <<>> -> <<>>;
+                    true -> <<Path/binary,"/">>
+                end,
             maps:fold(fun(Name,Item,Acc)->
-                ItemPath =
-                    if
-                        Path =:= <<>> -> Name;
-                        true -> <<Path/binary,"/",Name/binary>>
-                    end,
                 if
                     Item =:= ?FOLDER_TYPE ->
-                        Acc#{Name => #{<<"id">>=>ItemPath, <<"children">>=> items_tree(PID,Timeout,ItemPath)}};
+                        Acc#{Name => items_tree(PID,Timeout,<<PathPrefix/binary,Name/binary>>)};
                     Item =:= ?TAG_TYPE ->
-                        Acc#{Name => ItemPath};
+                        Acc#{Name => Item};
                     true ->
                         % Ignore other types
                         Acc
@@ -191,7 +192,16 @@ items_tree(PID,Timeout,Path)->
             end,#{},Items);
         {error,Error}->
             throw(Error)
-    end.   
+    end.
+
+find_recursive(PID, Context, Search)->
+    find_recursive(PID, Context, Search, undefined).
+find_recursive(PID, Context, Search, Timeout)->
+    Args = #{
+        context => Context,
+        search => Search
+    },
+    eport_c:request( PID, <<"find_recursive">>, Args, Timeout ).
 
 create_certificate( Name )->
     Priv = code:priv_dir(eopcua),

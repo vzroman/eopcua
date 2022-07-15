@@ -28,7 +28,7 @@ fi
 case "$1" in
     clean)
         rm -rf open62541
-        rm -rf cJSON
+        rm -rf uthash
         ;;
 
     build)
