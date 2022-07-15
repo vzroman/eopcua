@@ -509,7 +509,7 @@ char *create_folder( const UA_NodeId folder, const char *name, UA_NodeId *nodeId
         folder,
         referenceTypeId,
         qname, 
-        UA_NODEID_NUMERIC(0, UA_NS0ID_BASEOBJECTTYPE),
+        UA_NODEID_NUMERIC(0, UA_NS0ID_FOLDERTYPE),
         attr, 
         NULL, 
         nodeId);
