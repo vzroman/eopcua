@@ -1123,9 +1123,12 @@ char *build_browse_cache(UA_NodeId folder, char *context){
         UA_ReferenceDescription *ref = &items.array[i];
 
         char * name = (char *)ref->displayName.text.data;
-
         char path[strlen(context) + strlen(name) + 2];
-        sprintf(path,"%s/%s",context, name); 
+        if (strcmp(context,"") == 0){
+            sprintf(path,"%s",name); 
+        }else{
+            sprintf(path,"%s/%s",context, name); 
+        }
 
         error = add_cache(path, &ref->nodeId.nodeId );
         if (error) goto on_clear; 
