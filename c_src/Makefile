@@ -6,11 +6,16 @@ BASEDIR := $(abspath $(CURDIR)/..)
 PROJECT ?= $(notdir $(BASEDIR))
 PROJECT := $(strip $(PROJECT))
 
-# eport_c and cJSON libraries
-EPORT_C_INCLUDE_DIR ?= $(BASEDIR)/_build/default/lib/eport_c/priv/include
-EPORT_C_LIB_DIR ?= $(BASEDIR)/_build/default/lib/eport_c/priv
+BUILD ?= $(BASEDIR)/_build
+ifeq "$(wildcard $(BUILD) )" ""
+	BUILD := $(abspath $(BASEDIR)/../../..)
+endif
 
-CJSON_INCLUDE_DIR ?= $(BASEDIR)/_build/default/lib/eport_c/priv/cjson
+# eport_c and cJSON libraries
+EPORT_C_INCLUDE_DIR ?= $(BUILD)/default/lib/eport_c/priv/include
+EPORT_C_LIB_DIR ?= $(BUILD)/default/lib/eport_c/priv
+
+CJSON_INCLUDE_DIR ?= $(BUILD)/default/lib/eport_c/priv/cjson
 
 
 OPEN62541_INCLUDE_DIR ?= $(CURDIR)/open62541/build/_install/include

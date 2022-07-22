@@ -44,11 +44,20 @@ cJSON* opcua_client_write_item(cJSON* args, char **error);
 
 cJSON* opcua_client_browse_servers(cJSON* args, char **error);
 cJSON* opcua_client_browse_folder(cJSON* args, char **error);
+cJSON* opcua_client_find_recursive(cJSON* args, char **error);
 
+opcua_client_subscription *find_binding(char *path, char **error);
 char *path2nodeId( char *path, UA_NodeId *nodeId );
 char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId);
-UA_BrowseResponse browse_folder(UA_NodeId folder);
+RefArray browse_folder(UA_NodeId folder, u_int offset, u_int limit, char **error);
+char *find_recursive(UA_NodeId folder, char *search, cJSON *result);
+char *build_browse_cache(UA_NodeId folder, char *context);
 char *replace_host(char *URL, char *host);
+
+char *initRefArray(RefArray *a, size_t initialSize);
+char *insertRefArray(RefArray *a, UA_ReferenceDescription element);
+void freeRefArray(RefArray *a);
+
 
 //--------------update thread loop-----------------------------
 const char *init_update_loop(void);
@@ -64,15 +73,11 @@ UA_UInt32 subscriptionId;
 int update_interval = 100000; // 100 ms
 pthread_mutex_t lock;
 
-// Subscription indexes
-opcua_client_binding *opcua_client_bindings = NULL;
-opcua_client_subscription *opcua_client_subscriptions = NULL;
-
 cJSON* on_request( char *method, cJSON *args, char **error ){
     
     cJSON *response = NULL;
     // Handle the request
-    LOGDEBUG("handle the request %s", method);
+    LOGTRACE("handle the request %s", method);
 
     // open62541 is not thread safe, we use mutex
     pthread_mutex_lock(&lock); 
@@ -91,6 +96,8 @@ cJSON* on_request( char *method, cJSON *args, char **error ){
         response = opcua_client_write_item( args, error );
     }else if (strcmp(method, "browse_folder") == 0){
         response = opcua_client_browse_folder( args, error );
+    }else if (strcmp(method, "find_recursive") == 0){
+        response = opcua_client_find_recursive( args, error );
     } else{
         *error = "invalid method";
     }
@@ -219,7 +226,8 @@ on_error:
 //         "privateKey": "<base64 encoded pem>",
 //         "login":"user1",
 //         "password":"secret",
-//         "update_cycle":200
+//         "update_cycle":200,
+//         "cache": true
 //     }
 cJSON* opcua_client_connect(cJSON* args, char **error){
     cJSON *response = NULL;
@@ -305,7 +313,7 @@ cJSON* opcua_client_connect(cJSON* args, char **error){
         }
 
         // Parse the application URI from the certificate
-        appURI = parse_certificate_uri( cert, error );   
+        appURI = parse_certificate_uri( cert, error );
         if (appURI == NULL){
             goto on_error;
         } 
@@ -350,6 +358,13 @@ cJSON* opcua_client_connect(cJSON* args, char **error){
         goto on_error;
     }
 
+    cJSON *cache = cJSON_GetObjectItemCaseSensitive(args, "cache");
+    if (cJSON_IsBool(cache) && cache->valueint){
+        LOGINFO("build browse cache");
+        *error = build_browse_cache(UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), "");
+        if (*error) goto on_error;
+    }
+
     *error = (char *)init_update_loop();
     if (*error != NULL){
         goto on_error;
@@ -368,10 +383,10 @@ on_error:
         free(appURI);
     }
     if (cert!= NULL){
-        UA_ByteString_clear( cert );
+        UA_ByteString_delete( cert );
     }
     if (key!= NULL){
-        UA_ByteString_clear( key );
+        UA_ByteString_delete( key );
     }
     cJSON_Delete( response );
     return NULL;
@@ -402,7 +417,9 @@ cJSON* opcua_client_read_items(cJSON* args, char **error){
     cJSON_ArrayForEach(item, args) {
         result = opcua_client_read_item( item, error );
         if (result == NULL){
-            result = cJSON_CreateString("error: read error");
+            char _error[strlen(*error) + strlen("error: ") + 1];
+            sprintf(_error,"error: %s",*error); 
+            result = cJSON_CreateString(_error);
         }
         if ( !cJSON_AddItemToArray(response, result) ){
             *error = "unable add a result for item";
@@ -420,8 +437,6 @@ cJSON* opcua_client_read_item(cJSON* args, char **error){
     LOGTRACE("read item");
 
     cJSON *response = NULL;
-    UA_StatusCode sc;
-    UA_Variant *nodeValue = NULL;
 
     if (opcua_client == NULL){
         *error = "no connection";
@@ -438,93 +453,23 @@ cJSON* opcua_client_read_item(cJSON* args, char **error){
     char * path = args->valuestring;
 
     // Lookup the binding in the collection
-    opcua_client_binding *b = NULL;
-    opcua_client_subscription *s = NULL;
-    HASH_FIND_STR(opcua_client_bindings, path, b);
+    opcua_client_subscription *s = find_binding(path, error);
+    if (s == NULL) goto on_error;
 
-    if (b == NULL){
-        // The binding is not in the collection yet.
-        // Create a new subscription.
-        LOGDEBUG("create a new subscription");
+    if (s->status != UA_STATUSCODE_GOOD){
+        *error = (char*)UA_StatusCode_name( s->status );
+        goto on_error;
+    }
 
-        // Get nodeId
-        UA_NodeId nodeId;
-        *error = path2nodeId( path, &nodeId );
-        if (*error != NULL){
-            goto on_error;
-        }
-
-        nodeValue = UA_Variant_new();
-        sc = UA_Client_readValueAttribute(opcua_client, nodeId, nodeValue);
-        if (sc != UA_STATUSCODE_GOOD ) {
-            *error = (char*)UA_StatusCode_name( sc );;
-            goto on_error;
-        }
-
-        response = ua2json( nodeValue->type, nodeValue->data );
-        if (response == NULL){
-            *error = "data type is no supported";
-            goto on_error;
-        }
-        // Add the binding to the monitored items
-        UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(nodeId);
-        UA_MonitoredItemCreateResult monResponse =
-        UA_Client_MonitoredItems_createDataChange(opcua_client, subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
-                                                monRequest, NULL, on_subscription_update, NULL);
-
-        if(monResponse.statusCode != UA_STATUSCODE_GOOD){
-            *error = (char*)UA_StatusCode_name( monResponse.statusCode );
-            goto on_error;
-        }
-
-        LOGDEBUG("monResponse.monitoredItemId %d", monResponse.monitoredItemId);
-
-        // Add the binding to the collection
-        b = (opcua_client_binding *)malloc(sizeof *b);
-        if (b == NULL){
-            *error = "unable to allocate the memory for a new binding index";
-            goto on_error;
-        }
-        b->path = strdup( path );
-        b->id = monResponse.monitoredItemId;
-
-        s = (opcua_client_subscription *)malloc(sizeof *s);
-        if (s == NULL){
-            *error = "unable to allocate the memory for new binding";
-            goto on_error;
-        }
-        s->id = monResponse.monitoredItemId;
-        s->nodeId = nodeId;
-        s->value = nodeValue;
-        
-        HASH_ADD_STR(opcua_client_bindings, path, b);
-        HASH_ADD_INT(opcua_client_subscriptions, id, s);
-        
-        return response;
-    }else{
-        // The binding is already in the active subscriptions
-        LOGTRACE("lookup the value in the active subscriptions");
-
-        // Lookup the value
-        HASH_FIND_INT(opcua_client_subscriptions, &b->id, s);
-        if (s == NULL){
-            *error = "invalid subscription index";
-            goto on_error;
-        }
-
-        response = ua2json( s->value->type, s->value->data );
-        if (response == NULL){
-            *error = "invalid value";
-            goto on_error;
-        }
+    response = ua2json( s->value->type, s->value->data );
+    if (response == NULL){
+        *error = "invalid value";
+        goto on_error;
     }
 
     return response;
 
 on_error:
-    if(nodeValue != NULL){
-        UA_Variant_delete(nodeValue);
-    } 
     cJSON_Delete( response );
     return NULL;
 }
@@ -552,8 +497,9 @@ cJSON* opcua_client_write_items(cJSON* args, char **error){
     cJSON_ArrayForEach(item, args) {
         result = opcua_client_write_item( item, error );
         if (result == NULL){
-            LOGERROR("write error %s",*error);
-            result = cJSON_CreateString("error: write error");
+            char _error[strlen(*error) + strlen("error: ") + 1];
+            sprintf(_error,"error: %s",*error); 
+            result = cJSON_CreateString(_error);
         }
         if ( !cJSON_AddItemToArray(response, result) ){
             *error = "unable add a result for item";
@@ -594,41 +540,29 @@ cJSON* opcua_client_write_item(cJSON* args, char **error){
     }
 
     // Lookup the binding in the collection
-    opcua_client_binding *b = NULL;
-    opcua_client_subscription *s = NULL;
-    HASH_FIND_STR(opcua_client_bindings, tag->valuestring, b);
+    opcua_client_subscription *s = find_binding(tag->valuestring, error);
+    if (s == NULL) goto on_error;
 
-    if (b == NULL){
-        // The item is not in the collection yet, subscribe to it
-        response = opcua_client_read_item(tag, error);
-        if (response == NULL){
-            goto on_error;
-        }
-        return opcua_client_write_item(args, error);
-    }else{
-        
-        // Lookup the value
-        HASH_FIND_INT(opcua_client_subscriptions, &b->id, s);
-        if (s == NULL){
-            *error = "invalid subscription index";
-            goto on_error;
-        }
-
-        UA_Variant *ua_value = json2ua(s->value->type, value);
-        if ( ua_value == NULL ){
-            *error = "invalid value";
-            goto on_error;
-        }
-
-        // Write the value
-        sc = UA_Client_writeValueAttribute(opcua_client, s->nodeId, ua_value);
-        UA_Variant_delete(ua_value);
-        if ( sc != UA_STATUSCODE_GOOD ){
-            *error = (char*)UA_StatusCode_name( sc );
-            goto on_error;
-        }
-        return cJSON_CreateString("ok");
+    UA_DataType *type = s->type;
+    if (s->value && s->value->type){
+        type = (UA_DataType *)s->value->type;
     }
+
+    UA_Variant *ua_value = json2ua(type, value);
+    if ( ua_value == NULL ){
+        *error = "invalid value";
+        goto on_error;
+    }
+
+    // Write the value
+    sc = UA_Client_writeValueAttribute(opcua_client, s->nodeId, ua_value);
+    UA_Variant_delete(ua_value);
+    if ( sc != UA_STATUSCODE_GOOD ){
+        *error = (char*)UA_StatusCode_name( sc );
+        goto on_error;
+    }
+    return cJSON_CreateString("ok");
+    
 
 on_error:
     cJSON_Delete( response );
@@ -643,46 +577,105 @@ cJSON* opcua_client_browse_folder(cJSON* args, char **error){
         goto on_error;
     }
 
-    if (!cJSON_IsString(args) || (args->valuestring == NULL)){
-        *error = "folder is not defined";
-        goto on_error; 
+    if (!cJSON_IsObject(args)){
+        *error = "invalid arguments format";
+        goto on_error;
+    }
+
+    char *path = "";
+    cJSON *_path = cJSON_GetObjectItemCaseSensitive(args, "path");
+    if (cJSON_IsString(_path) && (_path->valuestring != NULL)){
+        path = _path->valuestring;
+    }
+
+    u_int offset = 0;
+    cJSON *_offset = cJSON_GetObjectItemCaseSensitive(args, "offset");
+    if (cJSON_IsNumber(_offset)){
+        offset = _offset->valueint;
+    }
+
+    u_int limit = 0;
+    cJSON *_limit = cJSON_GetObjectItemCaseSensitive(args, "limit");
+    if (cJSON_IsNumber(_limit)){
+        limit = _limit->valueint;
     }
 
     UA_NodeId nodeId;
-    *error = path2nodeId( args->valuestring, &nodeId );
+    *error = path2nodeId( path, &nodeId );
     if (*error != NULL){
         goto on_error;
     }
 
-    UA_BrowseResponse ua_response = browse_folder( nodeId );
-
-    if (ua_response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        *error = (char*)UA_StatusCode_name( ua_response.responseHeader.serviceResult );
-        UA_BrowseResponse_clear(&ua_response);
-        goto on_error;
-    }
+    RefArray items = browse_folder( nodeId, offset, limit, error );
+    if (!items.array) goto on_error;
     
     // Build the result
     response = cJSON_CreateObject();
-    for(size_t i = 0; i < ua_response.resultsSize; ++i) {
-        for(size_t j = 0; j < ua_response.results[i].referencesSize; ++j) {
+    for(size_t i = 0; i < items.used; ++i) {
 
-            UA_ReferenceDescription *ref = &(ua_response.results[i].references[j]);
+        UA_ReferenceDescription *ref = &items.array[i];
             
-            // Some name can contain '/', it causes the path to be improperly interpretted.
-            // We replace them with "\"
-            char * name = str_replace( (char *)ref->displayName.text.data, "/", "\\" );
-            cJSON *temp = cJSON_AddNumberToObject(response, name, ref->nodeClass);
-            free(name);
-            if (temp == NULL) {
-                *error = "unable to add a node to the result";
-                UA_BrowseResponse_clear(&ua_response);
-                goto on_error; 
-            }
+        // Some name can contain '/', it causes the path to be improperly interpretted.
+        // We replace them with "\"
+        char * name = str_replace( (char *)ref->displayName.text.data, "/", "\\" );
+        cJSON *temp = cJSON_AddNumberToObject(response, name, ref->nodeClass);
+        free(name);
+        if (temp == NULL) {
+            freeRefArray(&items);
+            *error = "unable to add a node to the result";
+            goto on_error; 
         }
     }
+    freeRefArray(&items);
 
-    UA_BrowseResponse_clear(&ua_response);
+    return response;
+
+on_error:
+    cJSON_Delete( response );
+    return NULL;
+}
+
+cJSON* opcua_client_find_recursive(cJSON* args, char **error){
+    cJSON *response = NULL;
+
+    if (opcua_client == NULL){
+        *error = "no connection";
+        goto on_error;
+    }
+
+    if (!cJSON_IsObject(args)){
+        *error = "invalid arguments format";
+        goto on_error;
+    }
+
+    char *search = NULL;
+    cJSON *_search = cJSON_GetObjectItemCaseSensitive(args, "search");
+    if (!cJSON_IsString(_search) || (_search->valuestring == NULL)){
+        *error = "undefined search string";
+        goto on_error;
+    }
+    search = _search->valuestring;
+
+    char *context = "";
+    cJSON *_context = cJSON_GetObjectItemCaseSensitive(args, "context");
+    if (cJSON_IsString(_context) && (_context->valuestring != NULL)){
+        context = _context->valuestring;
+    }
+
+    UA_NodeId contextNodeId;
+    *error = path2nodeId( context, &contextNodeId );
+    if (*error != NULL){
+        goto on_error;
+    }
+
+    response = cJSON_CreateObject();
+    if (!response){
+        *error = "unable to create result set";
+        goto on_error;
+    }
+
+    *error = find_recursive(contextNodeId, search, response);
+    if (*error) goto on_error;
 
     return response;
 
@@ -695,9 +688,85 @@ on_error:
 //---------------------------------------------------------------------------
 //  Internal helpers
 //---------------------------------------------------------------------------
+opcua_client_subscription *find_binding(char *path, char **error){
+
+    // Lookup the binding in the collection
+    opcua_client_subscription *s = find_subscription(path, error);
+    if (*error) goto on_error;
+
+    if (!s){
+        // The binding is not in the collection yet.
+        // Create a new subscription.
+        LOGINFO("create a new subscription %s",path);
+
+        // Get nodeId
+        UA_NodeId nodeId;
+        *error = path2nodeId( path, &nodeId );
+        if (*error != NULL){
+            goto on_error;
+        }
+
+        UA_NodeId nodeIdCopy;
+        UA_StatusCode sc = UA_NodeId_copy( &nodeId, &nodeIdCopy);
+        if (sc != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( sc );
+            goto on_error;
+        }
+
+        UA_NodeId typeId;
+        sc = UA_Client_readDataTypeAttribute(opcua_client, nodeId, &typeId);
+        if (sc != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( sc );
+            goto on_error;
+        }
+
+        UA_Variant *nodeValue = UA_Variant_new();
+        UA_StatusCode nodeStatus = UA_Client_readValueAttribute(opcua_client, nodeId, nodeValue);
+
+        // Add the binding to the monitored items
+        UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(nodeId);
+        UA_MonitoredItemCreateResult monResponse =
+        UA_Client_MonitoredItems_createDataChange(opcua_client, subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
+                                                monRequest, NULL, on_subscription_update, NULL);
+
+        sc = monResponse.statusCode;
+        int monId = monResponse.monitoredItemId;
+
+        UA_MonitoredItemCreateRequest_clear(&monRequest);
+        UA_MonitoredItemCreateResult_clear(&monResponse);
+
+        if(sc != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( sc );
+            goto on_error;
+        }
+
+        s = add_subscription(path, 
+            monId, 
+            &nodeIdCopy, 
+            nodeValue, 
+            nodeStatus, 
+            (UA_DataType *)&UA_TYPES[typeId.identifier.numeric - 1],
+            error
+        );
+    }
+    
+    return s;
+
+on_error:
+    return NULL;
+}
+
 char *path2nodeId( char *path, UA_NodeId *nodeId ){
     char *error = NULL;
 
+    // Cached version
+    UA_NodeId *cached = lookup_cache( path );
+    if (cached){
+        *nodeId = *cached;
+        return NULL;
+    }
+
+    LOGTRACE("%s not in the cache, perform search", path);
     char **tokens = str_split( path, '/');
     // start from the root folder
     *nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
@@ -727,55 +796,354 @@ char *find_in_folder( UA_NodeId folder, char *name, UA_NodeId *nodeId){
     char *error = NULL;
     UA_StatusCode sc;
 
-    UA_BrowseResponse response = browse_folder( folder );
+    // Build the request
+    UA_BrowseRequest request;
+    UA_BrowseRequest_init(&request);
+
+    UA_BrowseResponse response;
+    UA_BrowseResponse_init(&response);
+
+    UA_BrowseNextRequest nextRequest;
+    UA_BrowseNextRequest_init(&nextRequest);
+
+    UA_BrowseNextResponse nextResponse;
+    UA_BrowseNextResponse_init(&nextResponse);
+
+    UA_ByteString continuation;
+    UA_ByteString_init(&continuation);
+
+    // The batches by 500 items
+    const u_int maxPerRequest = 500;
+
+    // Configure the request
+    request.requestedMaxReferencesPerNode = maxPerRequest;    
+    request.nodesToBrowse = UA_BrowseDescription_new();
+    request.nodesToBrowseSize = 1;
+    request.nodesToBrowse[0].nodeId = folder; 
+    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_DISPLAYNAME;
+
+    response = UA_Client_Service_browse(opcua_client, request);
+
     if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
         error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
-        goto on_error;
+        goto on_clear;
     }
 
-    bool found = false;
+    u_int count = 0;
     for(size_t i = 0; i < response.resultsSize; ++i) {
         for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
+            count++;
+            
+            UA_ReferenceDescription *ref = &response.results[i].references[j];
 
-            UA_ReferenceDescription *ref = &(response.results[i].references[j]);
             if (strcmp((char *)ref->displayName.text.data, name) == 0){
                 sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeId);
                 if (sc != UA_STATUSCODE_GOOD){
                     error = (char*)UA_StatusCode_name( sc );
                 }
-                found = true;
-                break;
+                goto on_clear;
             }
         }
-        if (found){ break; }
-    }
-    UA_BrowseResponse_clear(&response);
-    if (!found){
-        return "node not found";
     }
 
-    return NULL;
+    // There are no more nodes to browse
+    if ( count < maxPerRequest ) {
+        error = "node not found";
+        goto on_clear;
+    }
 
-on_error:
+    // Load step by step other nodes
+    nextRequest.continuationPointsSize=0;
+    UA_ByteString_copy(&response.results[0].continuationPoint, &continuation);
+    for(;;){
+        nextRequest.continuationPoints = NULL;
+        nextRequest.continuationPointsSize = 0;
+        UA_BrowseNextRequest_clear(&nextRequest);
+        UA_BrowseNextResponse_clear(&nextResponse);
+
+        nextRequest.releaseContinuationPoints = UA_FALSE;
+        nextRequest.continuationPoints = &continuation;
+        nextRequest.continuationPointsSize=1 ;
+
+        nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+
+        if (nextResponse.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+            error = (char*)UA_StatusCode_name( nextResponse.responseHeader.serviceResult );
+            goto on_clear;
+        }
+
+        count = 0;
+        for(size_t i = 0; i < nextResponse.resultsSize; ++i) {
+            for(size_t j = 0; j < nextResponse.results[i].referencesSize; ++j) {
+                count++;
+
+                UA_ReferenceDescription *ref = &nextResponse.results[i].references[j];
+
+                if (strcmp((char *)ref->displayName.text.data, name) == 0){
+                    sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeId);
+                    if (sc != UA_STATUSCODE_GOOD){
+                        error = (char*)UA_StatusCode_name( sc );
+                    }
+                    goto on_clear;
+                }
+            }
+        }
+        // No more results
+        if (count < maxPerRequest) {
+            error = "node not found";
+            goto on_clear;
+        }
+        UA_ByteString_clear(&continuation);
+        UA_ByteString_copy(&nextResponse.results[0].continuationPoint, &continuation);
+    }
+
+
+on_clear:
+    // The procedure is taken from:
+    //      open62541/tests/client/check_client_highlevel.c
+
+    // Release continuation points
+    UA_BrowseNextResponse_clear(&nextResponse);
+    nextRequest.releaseContinuationPoints = UA_TRUE;
+    nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+    UA_BrowseNextResponse_clear(&nextResponse);
+
+    // Clear the main request/response
+    UA_BrowseRequest_clear(&request);
     UA_BrowseResponse_clear(&response);
+
+    // Clear the nextRequest
+    nextRequest.continuationPoints = NULL;
+    nextRequest.continuationPointsSize = 0;
+    UA_BrowseNextRequest_clear(&nextRequest);
+
+    UA_ByteString_clear(&continuation);
+
     return error;
-
 }
 
-UA_BrowseResponse browse_folder(UA_NodeId folder){
+//-----------------browse folder utilities-------------------------------
+RefArray browse_folder(UA_NodeId folder, u_int offset, u_int limit, char **error){
+    
+    RefArray result;
+
     // Build the request
     UA_BrowseRequest request;
     UA_BrowseRequest_init(&request);
-    request.requestedMaxReferencesPerNode = 0;
+
+    UA_BrowseResponse response;
+    UA_BrowseResponse_init(&response);
+
+    UA_BrowseNextRequest nextRequest;
+    UA_BrowseNextRequest_init(&nextRequest);
+
+    UA_BrowseNextResponse nextResponse;
+    UA_BrowseNextResponse_init(&nextResponse);
+
+    UA_ByteString continuation;
+    UA_ByteString_init(&continuation);
+
+    // The batches by 500 items
+    const u_int maxPerRequest = 500; 
+    *error = initRefArray(&result, maxPerRequest);
+    if (*error) goto on_clear;
+
+    // Configure the request
+    request.requestedMaxReferencesPerNode = maxPerRequest;    
     request.nodesToBrowse = UA_BrowseDescription_new();
     request.nodesToBrowseSize = 1;
     request.nodesToBrowse[0].nodeId = folder; 
-    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_ALL;
+    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_DISPLAYNAME | UA_BROWSERESULTMASK_NODECLASS;
 
-    // Execute the request
-    UA_BrowseResponse response = UA_Client_Service_browse(opcua_client, request);
+    response = UA_Client_Service_browse(opcua_client, request);
+
+    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+        *error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
+        goto on_clear;
+    }
+
+    // The iterator
+    u_int iter = 0;
+
+    u_int count = 0;
+    for(size_t i = 0; i < response.resultsSize; ++i) {
+        for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
+            count++;
+
+            // Take only folders and variables
+            if(response.results[i].references[j].nodeClass != UA_NODECLASS_OBJECT 
+                && response.results[i].references[j].nodeClass != UA_NODECLASS_VARIABLE)
+                continue;
+
+            if (++iter <= offset) continue;
+            
+            // Add a copy of the reference
+            *error = insertRefArray(&result, response.results[i].references[j]);
+            if (*error) goto on_clear;
+
+            if (limit && result.used >= limit) goto on_clear;
+        }
+    }
+
+    // There are no more nodes to browse
+    if ( count < maxPerRequest ) goto on_clear;
+
+    // Load step by step other nodes
+    nextRequest.continuationPointsSize=0;
+    UA_ByteString_copy(&response.results[0].continuationPoint, &continuation);
+    for(;;){
+        nextRequest.continuationPoints = NULL;
+        nextRequest.continuationPointsSize = 0;
+        UA_BrowseNextRequest_clear(&nextRequest);
+        UA_BrowseNextResponse_clear(&nextResponse);
+
+        nextRequest.releaseContinuationPoints = UA_FALSE;
+        nextRequest.continuationPoints = &continuation;
+        nextRequest.continuationPointsSize=1 ;
+
+        nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+
+        if (nextResponse.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+            *error = (char*)UA_StatusCode_name( nextResponse.responseHeader.serviceResult );
+            goto on_clear;
+        }
+
+        count = 0;
+        for(size_t i = 0; i < nextResponse.resultsSize; ++i) {
+            for(size_t j = 0; j < nextResponse.results[i].referencesSize; ++j) {
+                count++;
+
+                // Take only folders and variables
+                if(nextResponse.results[i].references[j].nodeClass != UA_NODECLASS_OBJECT 
+                    && nextResponse.results[i].references[j].nodeClass != UA_NODECLASS_VARIABLE)
+                    continue;
+
+                if (++iter <= offset) continue;
+                // Add a copy of the reference
+                *error = insertRefArray(&result, nextResponse.results[i].references[j]);
+                if (*error) goto on_clear;
+
+                if (limit && result.used >= limit) goto on_clear;
+            }
+        }
+        // No more results
+        if (count < maxPerRequest) goto on_clear;
+        UA_ByteString_clear(&continuation);
+        UA_ByteString_copy(&nextResponse.results[0].continuationPoint, &continuation);
+    }
+
+
+on_clear:
+    // The procedure is taken from:
+    //      open62541/tests/client/check_client_highlevel.c
+
+    // Release continuation points
+    UA_BrowseNextResponse_clear(&nextResponse);
+    nextRequest.releaseContinuationPoints = UA_TRUE;
+    nextResponse = UA_Client_Service_browseNext(opcua_client, nextRequest);
+    UA_BrowseNextResponse_clear(&nextResponse);
+
+    // Clear the main request/response
     UA_BrowseRequest_clear(&request);
-    return response;
+    UA_BrowseResponse_clear(&response);
+
+    // Clear the nextRequest
+    nextRequest.continuationPoints = NULL;
+    nextRequest.continuationPointsSize = 0;
+    UA_BrowseNextRequest_clear(&nextRequest);
+
+    UA_ByteString_clear(&continuation);
+
+    if (*error) goto on_error;
+
+    return result;
+
+on_error:
+    freeRefArray(&result);
+    return result;
+}
+
+char *find_recursive(UA_NodeId folder, char *search, cJSON *result){
+    char *error = NULL;
+
+    RefArray items = browse_folder(folder, 0, 0, &error);
+
+    for(size_t i = 0; i < items.used; ++i) {
+
+        UA_ReferenceDescription *ref = &items.array[i];
+        char *name = (char *)ref->displayName.text.data;
+
+        if (strstr(name, search)){
+            // The node name contains the search
+            cJSON *temp = cJSON_AddNumberToObject(result, name, ref->nodeClass);
+            if (temp == NULL) {
+                error = "unable to add a node to the result";
+                goto on_clear; 
+            }
+        }else if(ref->nodeClass == UA_NODECLASS_OBJECT){
+            // There name does not match the search string but there might be nodes inside
+            cJSON *children = cJSON_CreateObject();
+            if (!children){
+                error = "out of memory";
+                goto on_clear;
+            }
+
+            error = find_recursive(ref->nodeId.nodeId, search, children );
+            if (error) {
+                cJSON_Delete( children );
+                goto on_clear;
+            }
+
+            // If the folder contains items that match the search we add it to the results
+            if (cJSON_GetArraySize( children )){
+                if (!cJSON_AddItemToObject(result, name, children)){
+                    error = "unable to add an item to the result";
+                    goto on_clear;
+                }
+            }else{
+                cJSON_Delete( children );
+            }
+        }
+
+    }
+
+on_clear:
+    freeRefArray( &items );
+    return error;
+}
+
+char *build_browse_cache(UA_NodeId folder, char *context){
+    char *error = NULL;
+
+    RefArray items = browse_folder(folder, 0, 0, &error);
+    if(error) goto on_clear;
+
+    for(size_t i = 0; i < items.used; ++i) {
+
+        UA_ReferenceDescription *ref = &items.array[i];
+
+        char * name = (char *)ref->displayName.text.data;
+        char path[strlen(context) + strlen(name) + 2];
+        if (strcmp(context,"") == 0){
+            sprintf(path,"%s",name); 
+        }else{
+            sprintf(path,"%s/%s",context, name); 
+        }
+
+        error = add_cache(path, &ref->nodeId.nodeId );
+        if (error) goto on_clear; 
+
+        // Add children recursively
+        if(ref->nodeClass == UA_NODECLASS_OBJECT){
+            error = build_browse_cache( ref->nodeId.nodeId, path );
+            if (error) goto on_clear; 
+        }
+    }
+
+on_clear:
+    freeRefArray( &items );
+    return error;
+
 }
 
 char *replace_host(char *URL, char *host){
@@ -882,6 +1250,8 @@ static void *update_loop_thread(void *arg) {
         UA_Client_disconnect(opcua_client);
         UA_Client_delete(opcua_client);
         opcua_client = NULL;
+        purge_subscriptions();
+        purge_cache();
     }
 
     return NULL;
@@ -890,18 +1260,10 @@ static void *update_loop_thread(void *arg) {
 static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
                          UA_UInt32 monId, void *monContext, UA_DataValue *value) {
 
-    // Lookup the subscription
-    opcua_client_subscription *s = NULL;
-    HASH_FIND_INT(opcua_client_subscriptions, &monId, s);
-    if (s != NULL){
-        // Update the value
-        LOGTRACE("update subscription %d",monId);
-        if (UA_Variant_copy( &value->value, s->value ) != UA_STATUSCODE_GOOD){
-            LOGERROR("unable to copy value on subscription update %d",monId);
-        }
-    }else{
-        LOGERROR("unable to update subscription %d",monId);
-    }
+    LOGTRACE("update subscription %d",monId);                         
+    char *error = update_subscription(monId, value);
+    if (error) LOGERROR("%s %d",error, monId);
+    
 }
 
 const char *opcua_client_update_subscriptions(){

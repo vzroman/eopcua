@@ -149,15 +149,87 @@ error:
     return NULL;
 }
 
-char* parse_certificate_uri(UA_ByteString *certificate, char **error){
+char *base64_files(cJSON *files, UA_ByteString **result){
+    char *error = NULL;
+    UA_StatusCode sc;
+
+    *result = NULL;
+    int size = cJSON_GetArraySize( files );
+
+    *result = (UA_ByteString *) UA_malloc(size * sizeof(UA_ByteString));
+    if (!*result){
+        error = "out of memory";
+        goto on_error;
+    }
+
+    for (int i=0; i < size; i++){
+        cJSON *file = cJSON_GetArrayItem(files, i);
+        if (!cJSON_IsString(file) || (file->valuestring == NULL)){
+            error = "file body is not defined";
+            // It is a secure connection, the key must be provided
+            goto on_error;
+        }
+        UA_ByteString * fileBody = parse_base64( file->valuestring );
+        if (fileBody == NULL){
+            error = "unable to parse file body from base64";
+            goto on_error;
+        }
+        sc = UA_ByteString_copy(fileBody, &(*result[i]) );
+        UA_ByteString_delete( fileBody );
+
+        if (sc != UA_STATUSCODE_GOOD){
+            error =  (char *)UA_StatusCode_name( sc );
+            goto on_error;
+        }
+    }
+
+    return error;
+
+on_error:
+    if (*result != NULL) free(*result);
+    return error;
+
+}
+
+UA_ByteString loadFile(const char* path){
+	UA_ByteString fileContents = UA_STRING_NULL;
+
+    /* Open the file */
+    FILE *fp = fopen(path, "rb");
+    if(!fp) {
+        errno = 0; /* We read errno also from the tcp layer... */
+        return fileContents;
+    }
+
+    /* Get the file length, allocate the data and read */
+    fseek(fp, 0, SEEK_END);
+    fileContents.length = (size_t)ftell(fp);
+    fileContents.data = (UA_Byte *)UA_malloc(fileContents.length * sizeof(UA_Byte));
+    if(fileContents.data) {
+        fseek(fp, 0, SEEK_SET);
+        size_t read = fread(fileContents.data, sizeof(UA_Byte), fileContents.length, fp);
+        if(read != fileContents.length)
+            UA_ByteString_clear(&fileContents);
+    } else {
+        fileContents.length = 0;
+    }
+    fclose(fp);
+
+    return fileContents;
+}
+
+char* parse_certificate_uri(const UA_ByteString *certificate, char **error){
     X509 *cert = NULL;
     X509_EXTENSION *ex = NULL;
     BIO *ext_bio = NULL;
     BUF_MEM *bptr = NULL;
     char *URI = NULL;
 
+    const unsigned char * certData = (unsigned char *)certificate->data;
+    size_t certLength = certificate->length;
+
     // Parse the certificate
-    cert = d2i_X509(NULL, (const unsigned char **)&certificate->data, certificate->length);
+    cert = d2i_X509(NULL, &certData, certLength);
     if (!cert) {
         *error = "unable to parse certificate in memory";
         goto on_error;
@@ -217,7 +289,7 @@ char* parse_certificate_uri(UA_ByteString *certificate, char **error){
         goto on_error;
     }
     memcpy(URI, &bptr->data[URIStart], URIStop - URIStart);
-    URI[URIStop] = '\0';
+    URI[URIStop - URIStart] = '\0';
 
     BIO_free(ext_bio);
     X509_free(cert);
@@ -325,7 +397,7 @@ UA_Variant *json2ua(const UA_DataType *type, cJSON *value){
             goto on_error;
         }
     }else if(type == &UA_TYPES[UA_TYPES_BOOLEAN] && isNumber){
-        UA_Boolean v = (value->valuedouble != 0) ;
+        UA_Boolean v = (value->valueint != 0) ;
         if ( UA_Variant_setScalarCopy( result, &v, &UA_TYPES[UA_TYPES_BOOLEAN]) != UA_STATUSCODE_GOOD) {
             goto on_error;
         }
@@ -335,11 +407,46 @@ UA_Variant *json2ua(const UA_DataType *type, cJSON *value){
             goto on_error;
         }
     }else{
-        goto on_error;
+        // Try other types as double
+        if (UA_Variant_setScalarCopy( result, &value->valuedouble, type) != UA_STATUSCODE_GOOD){
+            goto on_error;
+        }
     }
     return result;
 
 on_error:
     UA_Variant_delete(result);
+    return NULL;
+}
+
+const UA_DataType *type2ua(const char *type ){
+
+    if( strcmp(type,"Boolean") == 0 ){
+        return &UA_TYPES[UA_TYPES_BOOLEAN];
+    }else if( strcmp(type,"SByte") == 0 ){
+        return &UA_TYPES[UA_TYPES_SBYTE];
+    }else if( strcmp(type,"Byte") == 0){
+        return &UA_TYPES[UA_TYPES_BYTE];
+    }else if( strcmp(type,"Int16")==0 ){
+        return &UA_TYPES[UA_TYPES_INT16];
+    }else if( strcmp(type,"UInt16")==0 ){
+        return &UA_TYPES[UA_TYPES_UINT16];
+    }else if( strcmp(type,"Int32")==0 ){
+        return &UA_TYPES[UA_TYPES_INT32];
+    }else if( strcmp(type,"UInt32")==0 ){
+        return &UA_TYPES[UA_TYPES_UINT32];
+    }else if( strcmp(type,"Int64")==0 ){
+        return &UA_TYPES[UA_TYPES_INT64];
+    }else if( strcmp(type,"UInt64")==0 ){
+        return &UA_TYPES[UA_TYPES_UINT64];
+    }else if( strcmp(type,"Float")==0 ){
+        return &UA_TYPES[UA_TYPES_FLOAT];
+    }else if( strcmp(type,"Double")==0 ){
+        return &UA_TYPES[UA_TYPES_DOUBLE];
+    }else if( strcmp(type,"String")==0 ){
+        return &UA_TYPES[UA_TYPES_STRING];
+    }
+
+    // TODO. Support other types
     return NULL;
 }

@@ -38,18 +38,14 @@
     read_item/2,read_item/3,
     write_items/2,write_items/3,
     write_item/3,write_item/4,
-    browse_folder/2,browse_folder/3,
+    browse_folder/4,browse_folder/5,
     items_tree/1,items_tree/2,
+    find_recursive/3,find_recursive/4,
     create_certificate/1
-]).
-
--export([
-    test/0
 ]).
 
 -define(CONNECT_TIMEOUT,30000).
 -define(RESPONSE_TIMEOUT,5000).
--define(NO_ACTIVITY_TIMEOUT,300000). % 5 min
 
 -define(FOLDER_TYPE,1).
 -define(TAG_TYPE,2).
@@ -80,7 +76,7 @@ set_log_level(PID, Level)->
 %%	Protocol API
 %%==============================================================================
 browse_servers(PID, Params)->
-    browse_servers(PID, Params,?RESPONSE_TIMEOUT).
+    browse_servers(PID, Params, undefined).
 browse_servers(PID, Params, Timeout)->
     eport_c:request( PID, <<"browse_servers">>, Params, Timeout ).
 
@@ -101,7 +97,7 @@ connect(PID, Params, Timeout)->
     end.
 
 read_items(PID, Items)->
-    read_items(PID,Items,?RESPONSE_TIMEOUT).
+    read_items(PID, Items, undefined).
 read_items(PID, Items, Timeout) when is_map( Items )->
     Items1 = maps:to_list( Items ),
     case read_items( PID, Items1, Timeout ) of
@@ -126,12 +122,12 @@ read_items(PID, Items, Timeout)->
     end.
 
 read_item(PID, Item)->
-    read_item(PID,Item,?RESPONSE_TIMEOUT).
+    read_item(PID, Item, undefined).
 read_item(PID, Item, Timeout)->
     eport_c:request( PID, <<"read_item">>, Item, Timeout ).
 
 write_items(PID, Items)->
-    write_items(PID,Items,?RESPONSE_TIMEOUT).
+    write_items(PID, Items, undefined).
 write_items(PID, Items, Timeout)->
     Items1 =
         [ [ I, V] || {I, V} <- maps:to_list( Items )],
@@ -150,20 +146,25 @@ write_items(PID, Items, Timeout)->
 
 
 write_item(PID, Item, Value)->
-    write_item(PID,Item, Value,?RESPONSE_TIMEOUT).
+    write_item(PID, Item, Value, undefined).
 write_item(PID, Item, Value, Timeout)->
     case eport_c:request( PID, <<"write_item">>, [Item,Value], Timeout ) of
         {ok, <<"ok">>} -> ok;
         Error -> Error
     end.
 
-browse_folder(PID, Path)->
-    browse_folder(PID, Path, ?RESPONSE_TIMEOUT).
-browse_folder(PID, Path, Timeout)->
-    eport_c:request( PID, <<"browse_folder">>, Path, Timeout ).  
+browse_folder(PID, Path, Offset, Limit)->
+    browse_folder(PID, Path, Offset, Limit, undefined).
+browse_folder(PID, Path, Offset, Limit, Timeout)->
+    Args = #{
+        path => Path,
+        offset => Offset,
+        limit => Limit
+    },
+    eport_c:request( PID, <<"browse_folder">>, Args, Timeout ).
 
 items_tree(PID)->
-    items_tree(PID, ?RESPONSE_TIMEOUT).
+    items_tree(PID, undefined).
 items_tree(PID, Timeout)->
     try
         {ok, items_tree(PID,Timeout,_Path = <<>>)}
@@ -171,19 +172,19 @@ items_tree(PID, Timeout)->
         _:Error-> {error, Error}
     end.
 items_tree(PID,Timeout,Path)->
-    case browse_folder(PID,Path,Timeout) of
+    case browse_folder(PID,Path, _Offset = undefined, _Limit = undefined, Timeout) of
         {ok,Items}->
+            PathPrefix =
+                if
+                    Path =:= <<>> -> <<>>;
+                    true -> <<Path/binary,"/">>
+                end,
             maps:fold(fun(Name,Item,Acc)->
-                ItemPath =
-                    if
-                        Path =:= <<>> -> Name;
-                        true -> <<Path/binary,"/",Name/binary>>
-                    end,
                 if
                     Item =:= ?FOLDER_TYPE ->
-                        Acc#{Name => #{<<"id">>=>ItemPath, <<"children">>=> items_tree(PID,Timeout,ItemPath)}};
+                        Acc#{Name => items_tree(PID,Timeout,<<PathPrefix/binary,Name/binary>>)};
                     Item =:= ?TAG_TYPE ->
-                        Acc#{Name => ItemPath};
+                        Acc#{Name => Item};
                     true ->
                         % Ignore other types
                         Acc
@@ -191,7 +192,16 @@ items_tree(PID,Timeout,Path)->
             end,#{},Items);
         {error,Error}->
             throw(Error)
-    end.   
+    end.
+
+find_recursive(PID, Context, Search)->
+    find_recursive(PID, Context, Search, undefined).
+find_recursive(PID, Context, Search, Timeout)->
+    Args = #{
+        context => Context,
+        search => Search
+    },
+    eport_c:request( PID, <<"find_recursive">>, Args, Timeout ).
 
 create_certificate( Name )->
     Priv = code:priv_dir(eopcua),
@@ -218,21 +228,6 @@ create_certificate( Name )->
     file:delete(Cert),
 
     Result.
-
-test()->
-    {ok,Port} = eopcua_client:start_link(<<"my_connection">>),
-
-    {ok, Cert} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.der"),
-    {ok, Key} = file:read_file("/home/roman/PROJECTS/SOURCES/eopcua/cert/eopcua.pem"),
-
-    {ok,<<"ok">>} = eopcua_client:connect(Port, #{
-        host=> <<"localhost">>, 
-        port => 53530, endpoint => <<"OPCUA/SimulationServer">>, 
-        login => <<"test_user">>, 
-        password => <<"111111">>, 
-        certificate=> base64:encode(Cert), 
-        private_key=> base64:encode( Key)
-    }).
 
 
 
