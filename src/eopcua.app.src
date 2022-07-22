@@ -1,6 +1,6 @@
 {application, eopcua,
  [{description, "An OTP library"},
-  {vsn, "0.1.2"},
+  {vsn, "0.1.3"},
   {registered, []},
   {applications,
    [kernel,
