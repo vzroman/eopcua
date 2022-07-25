@@ -148,51 +148,117 @@ typedef struct {
   char *path;
   UA_NodeId nodeId;
   UT_hash_handle hh;
-} opcua_client_cache;
+} opcua_client_path2nodeId_cache;
 
-opcua_client_cache *__browse_cache;
+typedef struct {
+  UA_NodeId nodeId;
+  char *path;
+  UT_hash_handle hh;
+} opcua_client_nodeId2path_cache;
+
+typedef void (*CacheIteratorCallback)(UA_NodeId nodeId, char *path);
+
+opcua_client_path2nodeId_cache *__path2nodeId_cache;
+opcua_client_nodeId2path_cache *__nodeId2path_cache;
 
 static char *add_cache(char *path, UA_NodeId *nodeId){
     char *error = NULL;
-    opcua_client_cache *c = (opcua_client_cache *)malloc( sizeof(opcua_client_cache) );
-    if (!c){
+
+    opcua_client_path2nodeId_cache *path2NodeId = NULL;
+    opcua_client_nodeId2path_cache *nodeId2path = NULL;
+
+    // Build path2nodeId index
+    path2NodeId = (opcua_client_path2nodeId_cache *)malloc( sizeof(opcua_client_path2nodeId_cache) );
+    if (!path2NodeId){
         error = "unable to allocate the memory for a cache entry";
         goto on_error;
     }
-    c->path = strdup(path);
-    UA_StatusCode sc = UA_NodeId_copy(nodeId, &c->nodeId);
+    path2NodeId->path = strdup(path);
+    UA_StatusCode sc = UA_NodeId_copy(nodeId, &path2NodeId->nodeId);
     if (sc != UA_STATUSCODE_GOOD){
         error = (char*)UA_StatusCode_name( sc );
         goto on_error;
     }
 
-    HASH_ADD_STR(__browse_cache, path, c);
+    // Build nodeId2path index
+    nodeId2path = (opcua_client_nodeId2path_cache *)malloc( sizeof(opcua_client_nodeId2path_cache) );
+    if (!nodeId2path){
+        error = "unable to allocate the memory for a cache entry";
+        goto on_error;
+    }
+    nodeId2path->path = strdup(path);
+    sc = UA_NodeId_copy(nodeId, &nodeId2path->nodeId);
+    if (sc != UA_STATUSCODE_GOOD){
+        error = (char*)UA_StatusCode_name( sc );
+        goto on_error;
+    }
+
+    HASH_ADD_STR(__path2nodeId_cache, path, path2NodeId);
+    HASH_ADD(hh, __nodeId2path_cache, nodeId, sizeof(UA_NodeId), nodeId2path);
 
     return NULL;
 
 on_error:
-  if (c) free(c);
+  if (path2NodeId) free(path2NodeId);
+  if (nodeId2path) free(nodeId2path);
   return error;
 }
 
-static UA_NodeId *lookup_cache(char *path){
-    opcua_client_cache *c = NULL;
-    HASH_FIND_STR(__browse_cache, path, c);
-    if (c == NULL){
+static UA_NodeId *lookup_path2nodeId_cache(char *path){
+    opcua_client_path2nodeId_cache *path2NodeId = NULL;
+    HASH_FIND_STR(__path2nodeId_cache, path, path2NodeId);
+    if (path2NodeId == NULL){
         return NULL;
     }else{
-       return &c->nodeId;
+       return &path2NodeId->nodeId;
     }
 }
 
-static void purge_cache(){
-    opcua_client_cache *c;
-    for (c= __browse_cache; c != NULL; c = c->hh.next) {
-        HASH_DEL(__browse_cache, c);
-        free( c->path );
-        free( c );
+static char *lookup_nodeId2path_cache(UA_NodeId nodeId){
+    opcua_client_nodeId2path_cache *nodeId2path = NULL;
+
+    HASH_FIND(hh, __nodeId2path_cache, &nodeId, sizeof(UA_NodeId), nodeId2path);
+
+    if (nodeId2path == NULL){
+        return NULL;
+    }else{
+       return nodeId2path->path;
     }
 }
+
+static char **get_all_cache_items(){
+
+    size_t size = HASH_CNT(hh, __path2nodeId_cache);
+    char **items = (char **)malloc( sizeof(char*) * (size + 1) );
+    size_t i = 0;
+
+    opcua_client_path2nodeId_cache *path2NodeId;
+    for (path2NodeId= __path2nodeId_cache; path2NodeId != NULL; path2NodeId = path2NodeId->hh.next) {
+        items[i++] = path2NodeId->path;
+    }
+    items[i] = NULL;
+    return items;
+}
+
+static void purge_cache(){
+
+    // Purge path2nodeId index
+    opcua_client_path2nodeId_cache *path2NodeId;
+    for (path2NodeId= __path2nodeId_cache; path2NodeId != NULL; path2NodeId = path2NodeId->hh.next) {
+        HASH_DEL(__path2nodeId_cache, path2NodeId);
+        free( path2NodeId->path );
+        free( path2NodeId );
+    }
+
+    // Purge nodeId2path index
+    opcua_client_nodeId2path_cache *nodeId2path, *tmp;
+    HASH_ITER(hh, __nodeId2path_cache, nodeId2path, tmp) {
+      HASH_DEL(__nodeId2path_cache, nodeId2path);
+      free( nodeId2path->path );
+      free( nodeId2path );
+    }
+}
+
 
 //-----------------------------------------------------
 //  Dynamic Reference Array

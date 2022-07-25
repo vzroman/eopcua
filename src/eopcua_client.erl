@@ -40,7 +40,7 @@
     write_item/3,write_item/4,
     browse_folder/4,browse_folder/5,
     items_tree/1,items_tree/2,
-    find_recursive/3,find_recursive/4,
+    find_recursive/2,find_recursive/3,
     create_certificate/1
 ]).
 
@@ -194,14 +194,10 @@ items_tree(PID,Timeout,Path)->
             throw(Error)
     end.
 
-find_recursive(PID, Context, Search)->
-    find_recursive(PID, Context, Search, undefined).
-find_recursive(PID, Context, Search, Timeout)->
-    Args = #{
-        context => Context,
-        search => Search
-    },
-    eport_c:request( PID, <<"find_recursive">>, Args, Timeout ).
+find_recursive(PID, Search)->
+    find_recursive(PID, Search, undefined).
+find_recursive(PID, Search, Timeout)->
+    eport_c:request( PID, <<"find_recursive">>, Search, Timeout ).
 
 create_certificate( Name )->
     Priv = code:priv_dir(eopcua),
