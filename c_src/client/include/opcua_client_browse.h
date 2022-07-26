@@ -23,7 +23,7 @@
 #include <open62541/client_highlevel.h>
 #include "opcua_client_browse_cache.h"
 
-char *build_browse_cache(UA_Client *client);
+char *build_browse_cache(UA_Client *client,size_t maxNodesPerBrowse);
 char *path2nodeId( char *path, UA_NodeId *nodeId );
 
 

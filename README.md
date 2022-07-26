@@ -36,7 +36,7 @@ Client Example
 
     {ok,ServerList} = eopcua_client:browse_servers(Port, #{ host=> <<"192.168.2.18">>, port => 4841 } ).
     
-    ok = eopcua_client:connect(Port, #{ url => hd(ServerList) }).
+    ok = eopcua_client:connect(Port, #{ url => hd(ServerList), max_nodes_per_browse => 1000 }).
 
     {ok,ResultList} = eopcua_client:search(Port, <<"Analog">> ).
     

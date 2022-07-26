@@ -52,7 +52,7 @@ char *add_cache(char *path, UA_NodeId *nodeId){
         goto on_error;
     }
     path2NodeId->nodeId = nodeId;
-    path2NodeId->path = strdup( path );
+    path2NodeId->path = path;
 
     // Build nodeId2path index
     nodeId2path = (opcua_client_nodeId2path_cache *)malloc( sizeof(opcua_client_nodeId2path_cache) );
@@ -61,7 +61,7 @@ char *add_cache(char *path, UA_NodeId *nodeId){
         goto on_error;
     }
     nodeId2path->nodeId = nodeId;
-    nodeId2path->path = strdup(path);
+    nodeId2path->path = path;
 
     HASH_ADD_STR(__path2nodeId_cache, path, path2NodeId);
     HASH_ADD_PTR(__nodeId2path_cache, nodeId, nodeId2path);
@@ -126,7 +126,6 @@ void purge_cache(){
     opcua_client_nodeId2path_cache *nodeId2path;
     for (nodeId2path= __nodeId2path_cache; nodeId2path != NULL; nodeId2path = nodeId2path->hh.next) {
         HASH_DEL(__nodeId2path_cache, nodeId2path);
-        free( nodeId2path->path );
         free( nodeId2path );
     }
 }

@@ -54,7 +54,7 @@ static char *opcua_client_update_subscriptions(){
         return (char *)UA_StatusCode_name( status );
     };
 
-    status = UA_Client_run_iterate(opcua_client.client, opcua_client.cycle);
+    status = UA_Client_run_iterate(opcua_client.client, 0);
     if (status != UA_STATUSCODE_GOOD){
         return (char *)UA_StatusCode_name( status );
     }
@@ -214,7 +214,7 @@ static char *init_update_loop(int cycle){
     }
 
     opcua_client.run = true;
-    opcua_client.cycle = cycle ? cycle : 100000; // 100 ms
+    opcua_client.cycle = cycle ? cycle * 1000 : 100000; // default 100 ms
 
     // The server is going to run in a dedicated thread
     pthread_t updateThread;
@@ -281,7 +281,7 @@ static char *replace_host(char *URL, char *host){
 //-----------------------------------------------------
 //  API
 //-----------------------------------------------------
-char *start(char *url, char *certificate, char *privateKey, char *login, char *pass, int cycle){
+char *start(char *url, char *certificate, char *privateKey, char *login, char *pass, uint cycle, size_t maxNodesPerBrowse){
     char *error = NULL;
     UA_StatusCode sc;
 
@@ -361,7 +361,7 @@ char *start(char *url, char *certificate, char *privateKey, char *login, char *p
     }
 
     LOGINFO("build browse cache...");
-    error = build_browse_cache( opcua_client.client );
+    error = build_browse_cache( opcua_client.client, maxNodesPerBrowse );
     if (error) goto on_error;
 
     LOGINFO("enter the update loop");

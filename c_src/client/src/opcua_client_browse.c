@@ -30,7 +30,7 @@
 typedef struct{
   UA_NodeId *nodeId;
   char *name;
-  UA_NodeClass nodeClass;
+  int nodeClass;
 } RefArrayEntry;
 
 typedef struct{
@@ -49,7 +49,7 @@ static char *initRefArray(RefArray *a, size_t initialSize) {
     return NULL;
 }
 
-static char *insertRefArray(RefArray *a, char *name, UA_NodeId *nodeId, UA_NodeClass nodeClass) {
+static char *insertRefArray(RefArray *a, char *name, UA_NodeId *nodeId, int nodeClass) {
     if (a->used >= a->size) {
         a->size += a->step;
         a->array = realloc(a->array, a->size * sizeof(RefArrayEntry));
@@ -57,8 +57,8 @@ static char *insertRefArray(RefArray *a, char *name, UA_NodeId *nodeId, UA_NodeC
     }
 
     a->array[a->used].nodeId = nodeId;
+    a->array[a->used].name = strdup(name);
     a->array[a->used].nodeClass = nodeClass;
-    a->array[a->used].name = strdup( name );
 
     a->used++;
 
@@ -75,140 +75,126 @@ static void freeRefArray(RefArray *a){
     a->used = 0;
 }
 
+static char *getNodePath(UA_NodeId *folder, char *name, char **path){
+    UA_NodeId root = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    if (UA_NodeId_equal(folder, &root)){
+        // This is the 'Objects' folder
+        *path = strdup( name );
+        return NULL;
+    }
+
+    char *context = lookup_nodeId2path_cache( folder );
+    if (!context) {
+        return "unable to find path by nodeId";
+    }
+
+    size_t length = strlen(context) + 1 + strlen(name);
+    *path = malloc(length + 1);
+    if (!*path) return "out of memory";
+
+    sprintf(*path,"%s/%s",context, name);
+    (*path)[length] = '\0';
+
+    return NULL;
+}
+
 //---------------------------------------------------------------------------
 //  Build Browse Cache
 //---------------------------------------------------------------------------
-static char *browse_folder(UA_Client *client, UA_NodeId folder, RefArray *result){
+static char *build_browse_cache_inner(UA_Client *client, RefArray *folders, size_t maxNodesPerBrowse){
 
     char *error = NULL;
 
     // Build the request
     UA_BrowseRequest request;
-    UA_BrowseRequest_init(&request);
-
     UA_BrowseResponse response;
+
+    UA_BrowseRequest_init(&request);
     UA_BrowseResponse_init(&response);
 
-    // The batches by 500 items
-    error = initRefArray(result, 500);
-    if (error) goto on_clear;
-
-    // Configure the request
-    request.requestedMaxReferencesPerNode = 0;    
-    request.nodesToBrowse = UA_BrowseDescription_new();
-    request.nodesToBrowseSize = 1;
-    request.nodesToBrowse[0].nodeId = folder; 
-    request.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_BROWSENAME | UA_BROWSERESULTMASK_NODECLASS;
-
-    response = UA_Client_Service_browse(client, request);
-
-    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
-        goto on_clear;
-    }
-
-    for(size_t i = 0; i < response.resultsSize; ++i) {
-        for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
-            UA_ReferenceDescription *ref = &response.results[i].references[j];
-
-            // Take only folders and variables
-            if(ref->nodeClass != UA_NODECLASS_OBJECT && ref->nodeClass != UA_NODECLASS_VARIABLE)
-                continue;
-            
-            // Add a copy of the reference
-            UA_NodeId *nodeIdCopy = UA_NodeId_new();
-            UA_StatusCode sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeIdCopy);
-            if (sc != UA_STATUSCODE_GOOD){
-                error = (char*)UA_StatusCode_name( sc );
-                goto on_clear;
-            }
-
-            error = insertRefArray(result, (char *)ref->browseName.name.data, nodeIdCopy, ref->nodeClass);
-            if (error) goto on_clear;
-        }
-    }
-
-on_clear:
-    // Clear the main request/response
-    UA_BrowseRequest_clear(&request);
-    UA_BrowseResponse_clear(&response);
-
-    if (!error) return NULL;
-    
-    freeRefArray( result );
-    return error;
-}
-
-static char *build_browse_cache_inner(UA_Client *client, RefArray *folders){
-
-    char *error = NULL;
-
+    // Found subfolders
     RefArray subfolders; subfolders.used = 0;
     error = initRefArray(&subfolders, 500);
     if (error) goto on_clear;
 
-    // Build the request
-    UA_BrowseRequest request;
-    UA_BrowseRequest_init(&request);
+    // Set the limit
+    size_t limit = maxNodesPerBrowse;
+    if (limit == 0 || folders->used < limit) limit = folders->used;
 
-    UA_BrowseResponse response;
-    UA_BrowseResponse_init(&response);
+    //----------------Folders cycle----------------------------------
+    for (size_t shift = 0; shift < folders->used; shift += limit){
+        // TODO. The limit can be defined at the server, we have to handle it
+        request.requestedMaxReferencesPerNode = 0;
 
-    // Configure the request
-    request.requestedMaxReferencesPerNode = 0;    
+        // Configure the request
+        size_t size = folders->used - shift;
+        if (size > limit) size = limit;
 
-    request.nodesToBrowse = UA_Array_new(folders->used, &UA_TYPES[UA_TYPES_BROWSEDESCRIPTION]);
-    request.nodesToBrowseSize = folders->used;
+        request.nodesToBrowse = UA_Array_new(size, &UA_TYPES[UA_TYPES_BROWSEDESCRIPTION]);
+        request.nodesToBrowseSize = size;
 
-    for(size_t i = 0; i < folders->used; ++i) {
-        request.nodesToBrowse[i].nodeId = *folders->array[i].nodeId; 
-        request.nodesToBrowse[i].resultMask = UA_BROWSERESULTMASK_BROWSENAME | UA_BROWSERESULTMASK_NODECLASS;
-    }
-
-    response = UA_Client_Service_browse(client, request);
-    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
-        goto on_clear;
-    }
-
-    for(size_t i = 0; i < response.resultsSize; ++i) {
-        for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
-
-            UA_ReferenceDescription *ref = &response.results[i].references[j];
-
+        for(size_t i = 0; i < size; ++i) {
             // Take only folders and variables
-            if(ref->nodeClass != UA_NODECLASS_OBJECT && ref->nodeClass != UA_NODECLASS_VARIABLE)
-                continue;
+            request.nodesToBrowse[i].nodeClassMask = UA_NODECLASS_OBJECT | UA_NODECLASS_VARIABLE;
+            request.nodesToBrowse[i].includeSubtypes = true;
+            request.nodesToBrowse[i].referenceTypeId = UA_NODEID_NUMERIC(0, UA_NS0ID_HIERARCHICALREFERENCES);
+            UA_NodeId_copy(folders->array[i + shift].nodeId, &request.nodesToBrowse[i].nodeId);
+            request.nodesToBrowse[i].resultMask = UA_BROWSERESULTMASK_BROWSENAME | UA_BROWSERESULTMASK_NODECLASS;
+        }
 
-            char *name = (char *)ref->browseName.name.data;
-            char *context = lookup_nodeId2path_cache( folders->array[i].nodeId );
-            if (!context) {
-                error = "unable to find path by nodeId";
-                goto on_clear;
-            }
+        // Trigger the request
+        response = UA_Client_Service_browse(client, request);
+        if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+            error = (char*)UA_StatusCode_name( response.responseHeader.serviceResult );
+            goto on_clear;
+        }
 
-            char path[strlen(context) + 1 + strlen(name)+1];
-            sprintf(path,"%s/%s",context, name);
+        //---------------results cycle------------------------------
+        for(size_t i = 0; i < response.resultsSize; ++i) {
+            for(size_t j = 0; j < response.results[i].referencesSize; ++j) {
 
-            UA_NodeId *nodeIdCopy = UA_NodeId_new();
-            UA_StatusCode sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeIdCopy);
-            if (sc != UA_STATUSCODE_GOOD){
-                error = (char*)UA_StatusCode_name( sc );
-                goto on_clear;
-            }
-            error = add_cache(path, nodeIdCopy );
-            if (error) goto on_clear; 
+                UA_ReferenceDescription *ref = &response.results[i].references[j];
+                
+                // Should we shows objects inside variables? 
+                if (ref->nodeClass == UA_NODECLASS_OBJECT && folders->array[i + shift].nodeClass == UA_NODECLASS_VARIABLE)
+                    continue;
 
-            // Add children recursively
-            if(ref->nodeClass == UA_NODECLASS_OBJECT){
+                char *name = (char *)ref->browseName.name.data;
+                char *path = NULL;
+                error = getNodePath(folders->array[i + shift].nodeId, name, &path);
+                if (error) goto on_clear;
+                
+                // Check if the node already in
+                UA_NodeId *exists = lookup_path2nodeId_cache( path );
+                if(exists) continue;
+
+                UA_NodeId *nodeIdCopy = UA_NodeId_new();
+                UA_StatusCode sc = UA_NodeId_copy(&ref->nodeId.nodeId, nodeIdCopy);
+                if (sc != UA_STATUSCODE_GOOD){
+                    error = (char*)UA_StatusCode_name( sc );
+                    goto on_clear;
+                }
+                
+                error = add_cache(path, nodeIdCopy );
+                if (error) goto on_clear; 
+
+                // Add children recursively
                 error = insertRefArray(&subfolders, (char *)ref->browseName.name.data, nodeIdCopy, ref->nodeClass);
                 if (error) goto on_clear;
             }
-        }
+        }   
+        //---------------results cycle end------------------------------
+
+        // Prepare fro the next step
+        UA_BrowseRequest_clear(&request);
+        UA_BrowseResponse_clear(&response);
+        UA_BrowseRequest_init(&request);
+        UA_BrowseResponse_init(&response);
     }
+    //---------------folders cycle end------------------------------
 
     if (subfolders.used){
-        error = build_browse_cache_inner(client, &subfolders );
+        error = build_browse_cache_inner(client, &subfolders, maxNodesPerBrowse );
         if (error) goto on_clear;
     }
 
@@ -223,41 +209,22 @@ on_clear:
 //---------------------------------------------------------------------------
 //  API
 //---------------------------------------------------------------------------
-char *build_browse_cache(UA_Client *client){
+char *build_browse_cache(UA_Client *client, size_t maxNodesPerBrowse){
     char *error;
-    UA_NodeId root = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
 
-    RefArray items; items.used = 0;
-    error = browse_folder(client, root, &items);
+    // Init folders array with 'Objects' folder
+    RefArray folders;
+    error = initRefArray(&folders, 1);
+    if(error) goto on_clear;
+    UA_NodeId root = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    error = insertRefArray(&folders, "", &root, UA_NODECLASS_OBJECT);
     if(error) goto on_clear;
 
-    // Found in the root subfolders
-    RefArray subfolders; subfolders.used = 0;
-    error = initRefArray(&subfolders, 500);
+    error = build_browse_cache_inner(client, &folders, maxNodesPerBrowse);
     if (error) goto on_clear;
 
-    for(size_t i = 0; i < items.used; ++i) {
-
-        char * name = items.array[i].name;
-
-        error = add_cache(name, items.array[i].nodeId );
-        if (error) goto on_clear; 
-
-        // Add children recursively
-        if(items.array[i].nodeClass == UA_NODECLASS_OBJECT){
-            error = insertRefArray(&subfolders, items.array[i].name, items.array[i].nodeId, items.array[i].nodeClass );
-            if (error) goto on_clear;
-        }
-    }
-
-    if (subfolders.used){
-        error = build_browse_cache_inner(client, &subfolders );
-        if (error) goto on_clear;
-    }
-
 on_clear:
-    freeRefArray( &items );
-    freeRefArray( &subfolders );
+    freeRefArray( &folders );
     return error;
 }
 

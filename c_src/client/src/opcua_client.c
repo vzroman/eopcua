@@ -97,10 +97,10 @@ on_clear:
 //         "privateKey": "<base64 encoded pem>",
 //         "login":"user1",
 //         "password":"secret",
-//         "update_cycle":200
+//         "update_cycle":200,
+//         "max_nodes_per_browse":1000
 //     }
 static cJSON* opcua_client_connect(cJSON* args, char **error){
-
     if ( is_started() ){
         *error = "already connected";
         goto on_error;
@@ -111,7 +111,6 @@ static cJSON* opcua_client_connect(cJSON* args, char **error){
         goto on_error;
     }
 
-
     //-----------validate the arguments-----------------------
     cJSON *url = cJSON_GetObjectItemCaseSensitive(args, "url");
     if (!cJSON_IsString(url) || (url->valuestring == NULL)){
@@ -120,10 +119,16 @@ static cJSON* opcua_client_connect(cJSON* args, char **error){
     }
     char *_url = url->valuestring;
 
-    int _update_cycle = 0;
+    uint _update_cycle = 0;
     cJSON *update_cycle = cJSON_GetObjectItemCaseSensitive(args, "update_cycle");
     if (cJSON_IsNumber(update_cycle)){
-        _update_cycle = update_cycle->valueint * 1000; 
+        _update_cycle = (uint)update_cycle->valueint; 
+    }
+
+    size_t _max_nodes_per_browse = 0;
+    cJSON *max_nodes_per_browse = cJSON_GetObjectItemCaseSensitive(args, "max_nodes_per_browse");
+    if (cJSON_IsNumber(max_nodes_per_browse)){
+        _max_nodes_per_browse = (size_t)max_nodes_per_browse->valueint; 
     }
 
     char *_certificate = NULL;
@@ -163,7 +168,8 @@ static cJSON* opcua_client_connect(cJSON* args, char **error){
         _privateKey,
         _login,
         _password,
-        _update_cycle
+        _update_cycle,
+        _max_nodes_per_browse
     );
     if (*error) goto on_error;
 

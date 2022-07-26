@@ -18,8 +18,6 @@
 #include <open62541/types_generated_handling.h>
 #include "opcua_client_subscription.h"
 
-// DEBUG:
-#include <eport_c_log.h>
 //-----------------------------------------------------
 //  Subscription indexes
 //-----------------------------------------------------
@@ -64,7 +62,6 @@ char *add_subscription(
     si->type = nodeType;
 
     HASH_ADD_STR(__node_index, path, ni);
-    LOGINFO("DEBUG: add monId %d", si->id);
     HASH_ADD_INT(__subscription_index, id, si);
 
     return NULL;
