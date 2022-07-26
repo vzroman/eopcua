@@ -33,17 +33,14 @@ Client Example
     {ok,Port} = eopcua_client:start_link(<<"my_connection">>).
     
     {ok,ServerList} = eopcua_client:browse_servers(Port, #{ host=> <<"localhost">>, port => 53530 } ).
+
+    {ok,ServerList} = eopcua_client:browse_servers(Port, #{ host=> <<"192.168.2.18">>, port => 4841 } ).
     
     ok = eopcua_client:connect(Port, #{ url => hd(ServerList) }).
-    
-    % Or use cached version for better performance
-    %ok = eopcua_client:connect(Port, #{ url => hd(ServerList), cache => true }).
-    
-    {ok,SubItems} = eopcua_client:browse_folder(Port, <<"StaticData/AnalogItems">>, undefined, undefined ).
 
-    {ok,SearchResultTree} = eopcua_client:find_recursive(Port, <<"StaticData">>, <<"Analog">> ).
+    {ok,ResultList} = eopcua_client:search(Port, <<"Analog">> ).
     
-    {ok,Tree} = eopcua_client:items_tree(Port ).
+    {ok,Tree} = eopcua_client:items_tree(Port).
     
     {ok,SinusoidValue} = eopcua_client:read_item(Port, <<"Simulation/Sinusoid">> ).
 
