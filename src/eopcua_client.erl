@@ -38,7 +38,6 @@
     read_item/2,read_item/3,
     write_items/2,write_items/3,
     write_item/3,write_item/4,
-    items_tree/1,items_tree/2,
     search/2,search/3,
     create_certificate/1
 ]).
@@ -151,11 +150,6 @@ write_item(PID, Item, Value, Timeout)->
         {ok, <<"ok">>} -> ok;
         Error -> Error
     end.
-
-items_tree(PID)->
-    items_tree(PID, undefined).
-items_tree(_PID, _Timeout)->
-    {ok,#{}}.
 
 
 search(PID, Search)->

@@ -175,11 +175,11 @@ static char *build_browse_cache_inner(UA_Client *client, RefArray *folders, size
                     goto on_clear;
                 }
                 
-                error = add_cache(path, nodeIdCopy );
+                error = add_cache(path, nodeIdCopy, ref->nodeClass);
                 if (error) goto on_clear; 
 
                 // Add children recursively
-                error = insertRefArray(&subfolders, (char *)ref->browseName.name.data, nodeIdCopy, ref->nodeClass);
+                error = insertRefArray(&subfolders, name, nodeIdCopy, ref->nodeClass);
                 if (error) goto on_clear;
             }
         }   

@@ -308,43 +308,9 @@ on_error:
     return NULL;
 }
 
-static cJSON* opcua_client_browse_nodes(cJSON* args, char **error){
-    cJSON *response = NULL;
-    char **items = NULL;
-
-    if (!is_started()){
-        *error = "no connection";
-        goto on_error;
-    }
-    
-    // Build the result
-    response = cJSON_CreateArray();
-    if (!response){
-        *error = "unable to create result set";
-        goto on_error;
-    }
-
-    items = get_all_cache_items();
-    for (int i = 0; *(items + i); i++){
-        char *item = *(items + i);
-        if (!cJSON_AddItemToArray(response, cJSON_CreateString( item ))){
-            *error = "unable to add item to the array";
-            goto on_error;
-        }
-    }
-    free(items);
-
-    return response;
-
-on_error:
-    if (items) free(items);
-    cJSON_Delete( response );
-    return NULL;
-}
-
 static cJSON* opcua_client_search(cJSON* args, char **error){
     cJSON *response = NULL;
-    char **items = NULL;
+    opcua_item *items = NULL;
 
     if (!is_started()){
         *error = "no connection";
@@ -358,18 +324,17 @@ static cJSON* opcua_client_search(cJSON* args, char **error){
 
     char *search = args->valuestring;;
 
-    response = cJSON_CreateArray();
+    response = cJSON_CreateObject();
     if (!response){
         *error = "unable to create result set";
         goto on_error;
     }
 
     items = get_all_cache_items();
-    for (int i = 0; *(items + i); i++){
-        char *item = *(items + i);
-        if (strstr(item, search)){
-            if (!cJSON_AddItemToArray(response, cJSON_CreateString( item ))){
-                *error = "unable to add item to the array";
+    for (int i = 0; items[i].nodeId; i++){
+        if (strstr(items[i].path, search)){
+            if (!cJSON_AddNumberToObject(response,items[i].path, items[i].nodeClass)){
+                *error = "unable to add an item to the result";
                 goto on_error;
             }
         }
@@ -405,8 +370,6 @@ static cJSON* on_request( char *method, cJSON *args, char **error ){
         response = opcua_client_write_items( args, error );
     }else if (strcmp(method, "write_item") == 0){
         response = opcua_client_write_item( args, error );
-    }else if (strcmp(method, "browse_nodes") == 0){
-        response = opcua_client_browse_nodes( args, error );
     }else if (strcmp(method, "search") == 0){
         response = opcua_client_search( args, error );
     } else{

@@ -38,9 +38,13 @@ Client Example
     
     ok = eopcua_client:connect(Port, #{ url => hd(ServerList), max_nodes_per_browse => 1000 }).
 
-    {ok,ResultList} = eopcua_client:search(Port, <<"Analog">> ).
-    
-    {ok,Tree} = eopcua_client:items_tree(Port).
+    % ResultMap has format:
+    %   #{
+    %       Path:=NodeClass
+    %       ...
+    %   }
+    % Search by empty string returns all the items
+    {ok, ResultMap} = eopcua_client:search(Port, <<"Analog">> ).
     
     {ok,SinusoidValue} = eopcua_client:read_item(Port, <<"Simulation/Sinusoid">> ).
 

@@ -26,6 +26,7 @@
 typedef struct {
   char *path;
   UA_NodeId *nodeId;
+  int nodeClass;
   UT_hash_handle hh;
 } opcua_client_path2nodeId_cache;
 
@@ -39,7 +40,7 @@ typedef struct {
 opcua_client_path2nodeId_cache *__path2nodeId_cache;
 opcua_client_nodeId2path_cache *__nodeId2path_cache;
 
-char *add_cache(char *path, UA_NodeId *nodeId){
+char *add_cache(char *path, UA_NodeId *nodeId, int nodeClass){
     char *error = NULL;
 
     opcua_client_path2nodeId_cache *path2NodeId = NULL;
@@ -53,6 +54,7 @@ char *add_cache(char *path, UA_NodeId *nodeId){
     }
     path2NodeId->nodeId = nodeId;
     path2NodeId->path = path;
+    path2NodeId->nodeClass = nodeClass;
 
     // Build nodeId2path index
     nodeId2path = (opcua_client_nodeId2path_cache *)malloc( sizeof(opcua_client_nodeId2path_cache) );
@@ -95,17 +97,23 @@ char *lookup_nodeId2path_cache(UA_NodeId *nodeId){
     }
 }
 
-char **get_all_cache_items(){
+opcua_item *get_all_cache_items(){
 
     size_t size = HASH_CNT(hh, __path2nodeId_cache);
-    char **items = (char **)malloc( sizeof(char*) * (size + 1) );
-    size_t i = 0;
+    opcua_item *items = (opcua_item *)malloc( sizeof(opcua_item) * (size + 1) );
 
-    opcua_client_path2nodeId_cache *path2NodeId;
+    opcua_client_path2nodeId_cache *path2NodeId; size_t i = 0;
     for (path2NodeId= __path2nodeId_cache; path2NodeId != NULL; path2NodeId = path2NodeId->hh.next) {
-        items[i++] = path2NodeId->path;
+        items[i].path = path2NodeId->path;
+        items[i].nodeId = path2NodeId->nodeId;
+        items[i].nodeClass = path2NodeId->nodeClass;
+        i++;
     }
-    items[i] = NULL;
+    // Mark end of array
+    items[i].nodeId = NULL;
+    items[i].path = NULL;
+    items[i].nodeClass = 0;
+
     return items;
 }
 
