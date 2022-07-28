@@ -15,79 +15,36 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-
+#include <open62541/plugin/accesscontrol_default.h>
+//----------------------------------------------------------
 #include "utilities.h"
 #include "opcua_server_config.h"
 
-// local functions
-char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryption);
-char *configure_access(UA_ServerConfig *config, cJSON* access);
-char *configure_description(UA_ServerConfig *config, cJSON* description);
-char *configure_limits(UA_ServerConfig *config, cJSON* limits);
+//-----------------------------------------------------------
+// Encryption
+//-----------------------------------------------------------
+static void disableUnencrypted(UA_ServerConfig *config) {
+    for(size_t i = 0; i < config->endpointsSize; i++) {
+        UA_EndpointDescription *ep = &config->endpoints[i];
+        if(ep->securityMode != UA_MESSAGESECURITYMODE_NONE)
+            continue;
 
-static void disableAnonymous(UA_ServerConfig *config);
-static void disableUnencrypted(UA_ServerConfig *config);
-
-// The entry point
-char *configure(UA_ServerConfig *config, cJSON* args){
-    char *error = NULL;
-    UA_StatusCode sc;
-
-    UA_Int16 ua_port = 4840;
-
-    //----------options-----------------
-    cJSON *port = cJSON_GetObjectItemCaseSensitive(args, "port");
-    if ( cJSON_IsNumber(port) ){
-        ua_port = (UA_Int16) port->valuedouble;
-    }
-
-    cJSON *encryption = cJSON_GetObjectItemCaseSensitive(args, "encryption");
-    if (cJSON_IsObject( encryption )){
-        // Encrypted
-        error = configure_encryption(config, ua_port, encryption);
-        if (error) goto on_error;
-    }else{
-        // No encryption
-        sc = UA_ServerConfig_setMinimal(config, ua_port, NULL);
-        if (sc != UA_STATUSCODE_GOOD){
-            error = (char *)UA_StatusCode_name( sc );
-            goto on_error;
+        UA_EndpointDescription_clear(ep);
+        /* Move the last to this position */
+        if(i + 1 < config->endpointsSize) {
+            config->endpoints[i] = config->endpoints[config->endpointsSize-1];
+            i--;
         }
+        config->endpointsSize--;
     }
-
-    cJSON *access = cJSON_GetObjectItemCaseSensitive(args, "access");
-    if ( cJSON_IsObject(access) ) {
-        error = configure_access(config, access);
-        if (error) goto on_error;
+    /* Delete the entire array if the last Endpoint was removed */
+    if(config->endpointsSize== 0) {
+        UA_free(config->endpoints);
+        config->endpoints = NULL;
     }
-
-    // Define custom host name
-    cJSON *host = cJSON_GetObjectItemCaseSensitive(args, "host");
-    if (cJSON_IsString(host) && (host->valuestring != NULL)){
-        config->customHostname = UA_STRING_ALLOC( host->valuestring );
-    }
-
-    cJSON *description = cJSON_GetObjectItemCaseSensitive(args, "description");
-    if (cJSON_IsObject(description)){
-        error = configure_description(config, description);
-        if (error) goto on_error;
-    }
-
-    cJSON *limits = cJSON_GetObjectItemCaseSensitive(args, "limits");
-    if (cJSON_IsObject(limits)){
-        error = configure_limits(config, limits);
-        if (error) goto on_error;
-    }
-
-
-    return error;
-
-on_error:
-    UA_ServerConfig_clean(config);
-    return error;
 }
 
-char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryption){
+static char *configure_encryption(UA_ServerConfig *config, UA_Int16 port, cJSON* encryption){
     char *error = NULL;
     UA_StatusCode sc;
 
@@ -183,7 +140,36 @@ on_error:
 
 }
 
-char *configure_access(UA_ServerConfig *config, cJSON* access){
+//-----------------------------------------------------------
+// Access
+//-----------------------------------------------------------
+static void disableAnonymous(UA_ServerConfig *config) {
+    for(size_t i = 0; i < config->endpointsSize; i++) {
+        UA_EndpointDescription *ep = &config->endpoints[i];
+
+        for(size_t j = 0; j < ep->userIdentityTokensSize; j++) {
+            UA_UserTokenPolicy *utp = &ep->userIdentityTokens[j];
+            if(utp->tokenType != UA_USERTOKENTYPE_ANONYMOUS)
+                continue;
+
+            UA_UserTokenPolicy_clear(utp);
+            /* Move the last to this position */
+            if(j + 1 < ep->userIdentityTokensSize) {
+                ep->userIdentityTokens[j] = ep->userIdentityTokens[ep->userIdentityTokensSize-1];
+                j--;
+            }
+            ep->userIdentityTokensSize--;
+        }
+
+        /* Delete the entire array if the last UserTokenPolicy was removed */
+        if(ep->userIdentityTokensSize == 0) {
+            UA_free(ep->userIdentityTokens);
+            ep->userIdentityTokens = NULL;
+        }
+    }
+}
+
+static char *configure_access(UA_ServerConfig *config, cJSON* access){
     char *error = NULL;
     UA_StatusCode sc;
 
@@ -271,7 +257,10 @@ on_error:
     return error;
 }
 
-char *configure_description(UA_ServerConfig *config, cJSON* description){
+//-----------------------------------------------------------
+// Description
+//-----------------------------------------------------------
+static char *configure_description(UA_ServerConfig *config, cJSON* description){
     char *error = NULL;
 
     cJSON *productName = cJSON_GetObjectItemCaseSensitive(description, "productName");
@@ -313,7 +302,10 @@ char *configure_description(UA_ServerConfig *config, cJSON* description){
     return error;
 }
 
-char *configure_limits(UA_ServerConfig *config, cJSON* limits){
+//-----------------------------------------------------------
+// Description
+//-----------------------------------------------------------
+static char *configure_limits(UA_ServerConfig *config, cJSON* limits){
     char *error = NULL;
 
     cJSON *maxSecureChannels = cJSON_GetObjectItemCaseSensitive(limits, "maxSecureChannels");
@@ -346,53 +338,65 @@ char *configure_limits(UA_ServerConfig *config, cJSON* limits){
         config->maxNodesPerWrite = (UA_UInt32) maxNodesPerWrite->valuedouble;
     }
 
-
     return error;
 }
 
-static void disableAnonymous(UA_ServerConfig *config) {
-    for(size_t i = 0; i < config->endpointsSize; i++) {
-        UA_EndpointDescription *ep = &config->endpoints[i];
+// The entry point
+char *configure(UA_ServerConfig *config, cJSON* args){
+    char *error = NULL;
+    UA_StatusCode sc;
 
-        for(size_t j = 0; j < ep->userIdentityTokensSize; j++) {
-            UA_UserTokenPolicy *utp = &ep->userIdentityTokens[j];
-            if(utp->tokenType != UA_USERTOKENTYPE_ANONYMOUS)
-                continue;
+    UA_Int16 ua_port = 4840;
 
-            UA_UserTokenPolicy_clear(utp);
-            /* Move the last to this position */
-            if(j + 1 < ep->userIdentityTokensSize) {
-                ep->userIdentityTokens[j] = ep->userIdentityTokens[ep->userIdentityTokensSize-1];
-                j--;
-            }
-            ep->userIdentityTokensSize--;
-        }
+    //----------options-----------------
+    cJSON *port = cJSON_GetObjectItemCaseSensitive(args, "port");
+    if ( cJSON_IsNumber(port) ){
+        ua_port = (UA_Int16) port->valuedouble;
+    }
 
-        /* Delete the entire array if the last UserTokenPolicy was removed */
-        if(ep->userIdentityTokensSize == 0) {
-            UA_free(ep->userIdentityTokens);
-            ep->userIdentityTokens = NULL;
+    cJSON *encryption = cJSON_GetObjectItemCaseSensitive(args, "encryption");
+    if (cJSON_IsObject( encryption )){
+        // Encrypted
+        error = configure_encryption(config, ua_port, encryption);
+        if (error) goto on_error;
+    }else{
+        // No encryption
+        sc = UA_ServerConfig_setMinimal(config, ua_port, NULL);
+        if (sc != UA_STATUSCODE_GOOD){
+            error = (char *)UA_StatusCode_name( sc );
+            goto on_error;
         }
     }
+
+    cJSON *access = cJSON_GetObjectItemCaseSensitive(args, "access");
+    if ( cJSON_IsObject(access) ) {
+        error = configure_access(config, access);
+        if (error) goto on_error;
+    }
+
+    // Define custom host name
+    cJSON *host = cJSON_GetObjectItemCaseSensitive(args, "host");
+    if (cJSON_IsString(host) && (host->valuestring != NULL)){
+        config->customHostname = UA_STRING_ALLOC( host->valuestring );
+    }
+
+    cJSON *description = cJSON_GetObjectItemCaseSensitive(args, "description");
+    if (cJSON_IsObject(description)){
+        error = configure_description(config, description);
+        if (error) goto on_error;
+    }
+
+    cJSON *limits = cJSON_GetObjectItemCaseSensitive(args, "limits");
+    if (cJSON_IsObject(limits)){
+        error = configure_limits(config, limits);
+        if (error) goto on_error;
+    }
+
+
+    return error;
+
+on_error:
+    UA_ServerConfig_clean(config);
+    return error;
 }
 
-static void disableUnencrypted(UA_ServerConfig *config) {
-    for(size_t i = 0; i < config->endpointsSize; i++) {
-        UA_EndpointDescription *ep = &config->endpoints[i];
-        if(ep->securityMode != UA_MESSAGESECURITYMODE_NONE)
-            continue;
-
-        UA_EndpointDescription_clear(ep);
-        /* Move the last to this position */
-        if(i + 1 < config->endpointsSize) {
-            config->endpoints[i] = config->endpoints[config->endpointsSize-1];
-            i--;
-        }
-        config->endpointsSize--;
-    }
-    /* Delete the entire array if the last Endpoint was removed */
-    if(config->endpointsSize== 0) {
-        UA_free(config->endpoints);
-        config->endpoints = NULL;
-    }
-}

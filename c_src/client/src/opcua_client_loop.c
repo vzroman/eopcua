@@ -208,7 +208,7 @@ static char *init_update_loop(int cycle){
     }
 
     // As the open62541 is not thread safe we use mutex
-    if (pthread_mutex_init(&opcua_client.lock, NULL) != 0) {
+    if (pthread_mutex_init(&opcua_client.lock, NULL)) {
         error = "mutex init has failed";
         goto on_error;
     }
@@ -224,6 +224,7 @@ static char *init_update_loop(int cycle){
 
     if (res !=0 ){
         error = "unable to launch the update loop thread";
+        pthread_mutex_destroy(&opcua_client.lock);
         goto on_error;
     }
  
@@ -231,7 +232,6 @@ static char *init_update_loop(int cycle){
 
 on_error:
     opcua_client.run = false;
-    pthread_mutex_destroy(&opcua_client.lock);
     UA_Client_Subscriptions_deleteSingle(opcua_client.client, opcua_client.subscriptionId);
     return error;
 }
@@ -288,10 +288,12 @@ char *start(char *url, char *certificate, char *privateKey, char *login, char *p
     UA_ByteString *cert = NULL;
     UA_ByteString *key = NULL;
     char *appURI = NULL;
+    
+    if (opcua_client.client) return "already started";
 
     // Create the client object
     opcua_client.client = UA_Client_new();
-    if (opcua_client.client == NULL){
+    if (!opcua_client.client){
         error = "unable to allocate the connection object";
         goto on_error;
     }
@@ -375,8 +377,9 @@ on_error:
     if (opcua_client.client){
         UA_Client_disconnect( opcua_client.client );
         UA_Client_delete( opcua_client.client );
-        opcua_client.client = NULL;
     }
+    opcua_client.client = NULL;
+    opcua_client.run = false;
 
     if (appURI)free(appURI);
     if (cert)UA_ByteString_delete( cert );

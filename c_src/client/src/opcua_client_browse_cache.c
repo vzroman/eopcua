@@ -37,8 +37,8 @@ typedef struct {
 } opcua_client_nodeId2path_cache;
 
 
-opcua_client_path2nodeId_cache *__path2nodeId_cache;
-opcua_client_nodeId2path_cache *__nodeId2path_cache;
+opcua_client_path2nodeId_cache *__path2nodeId_cache = NULL;
+opcua_client_nodeId2path_cache *__nodeId2path_cache = NULL;
 
 char *add_cache(char *path, UA_NodeId *nodeId, int nodeClass){
     char *error = NULL;

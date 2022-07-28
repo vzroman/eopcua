@@ -15,12 +15,21 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#ifndef eopcua_server_config__h
-#define eopcua_server_config__h
 
-#include <open62541/server_config_default.h>
+#ifndef eopcua_server_loop__h
+#define eopcua_server_loop__h
+
+#include <open62541/types.h>
 #include <eport_c.h>
 
-char *configure(UA_ServerConfig *config, cJSON* args);
+char* start(cJSON *args);
+void stop(void);
+bool is_started(void);
+
+char *add_variable(UA_NodeId folder, char *name, const UA_DataType *type, UA_NodeId *outNodeId);
+char *add_folder(UA_NodeId folder, char *name, UA_NodeId *outNodeId);
+
+char *write_value(UA_NodeId *nodeId, char *type, cJSON *value);
+char *read_value(UA_NodeId *nodeId, cJSON **value);
 
 #endif
