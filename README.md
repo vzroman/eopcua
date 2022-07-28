@@ -34,16 +34,15 @@ Client Example
     
     {ok,ServerList} = eopcua_client:browse_servers(Port, #{ host=> <<"localhost">>, port => 53530 } ).
     
-    ok = eopcua_client:connect(Port, #{ url => hd(ServerList) }).
-    
-    % Or use cached version for better performance
-    %ok = eopcua_client:connect(Port, #{ url => hd(ServerList), cache => true }).
-    
-    {ok,SubItems} = eopcua_client:browse_folder(Port, <<"StaticData/AnalogItems">>, undefined, undefined ).
+    ok = eopcua_client:connect(Port, #{ url => hd(ServerList), max_nodes_per_browse => 1000 }).
 
-    {ok,SearchResultTree} = eopcua_client:find_recursive(Port, <<"StaticData">>, <<"Analog">> ).
-    
-    {ok,Tree} = eopcua_client:items_tree(Port ).
+    % ResultMap has format:
+    %   #{
+    %       Path:=NodeClass
+    %       ...
+    %   }
+    % Search by empty string returns all the items
+    {ok, ResultMap} = eopcua_client:search(Port, <<"Analog">> ).
     
     {ok,SinusoidValue} = eopcua_client:read_item(Port, <<"Simulation/Sinusoid">> ).
 
@@ -82,7 +81,8 @@ Client Encrypted Connection
         certificate => base64:encode(Cert),     % Certificated in der format
         private_key => base64:encode(Key),      % Private key in pem format
         login => <<"test_user">>, 
-        password => <<"111111">> 
+        password => <<"111111">>,
+        max_nodes_per_browse => 1000
     }).
 
 Server Config 

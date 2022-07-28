@@ -15,11 +15,21 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#include <uthash.h>
-#include <open62541/types.h>
 
-typedef struct {
-  char *path;
-  UA_NodeId nodeId;
-  UT_hash_handle hh;
-} opcua_server_mapping;
+#ifndef eopcua_server_loop__h
+#define eopcua_server_loop__h
+
+#include <open62541/types.h>
+#include <eport_c.h>
+
+char* start(cJSON *args);
+void stop(void);
+bool is_started(void);
+
+char *add_variable(UA_NodeId folder, char *name, UA_NodeId *outNodeId);
+char *add_folder(UA_NodeId folder, char *name, UA_NodeId *outNodeId);
+
+char *write_value(UA_NodeId *nodeId, char *type, cJSON *value);
+char *read_value(UA_NodeId *nodeId, cJSON **value);
+
+#endif

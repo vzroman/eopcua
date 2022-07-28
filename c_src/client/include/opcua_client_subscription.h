@@ -15,12 +15,40 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#ifndef eopcua_server_config__h
-#define eopcua_server_config__h
 
-#include <open62541/server_config_default.h>
-#include <eport_c.h>
+#ifndef eopcua_client_subscription__h
+#define eopcua_client_browse_cache__h
 
-char *configure(UA_ServerConfig *config, cJSON* args);
+#include <open62541/types.h>
+#include <uthash.h>
+
+typedef struct {
+  char *path;
+  int id;
+  UT_hash_handle hh;
+} node_index;
+
+typedef struct {
+  int id;
+  UA_Variant *value;
+  UA_StatusCode status;
+  UA_DataType *type;
+  UA_NodeId nodeId;
+  UT_hash_handle hh;
+} subscription_index; 
+
+char *add_subscription(
+    char *path, 
+    int monId, 
+    UA_NodeId *nodeId, 
+    UA_Variant *nodeValue, 
+    UA_StatusCode nodeStatus, 
+    UA_DataType *nodeType
+);
+
+void monId2subscription(int monId, subscription_index **si);
+char *path2subscription(char *path, subscription_index **si);
+
+void purge_subscriptions(void);
 
 #endif

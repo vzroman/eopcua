@@ -38,9 +38,7 @@
     read_item/2,read_item/3,
     write_items/2,write_items/3,
     write_item/3,write_item/4,
-    browse_folder/4,browse_folder/5,
-    items_tree/1,items_tree/2,
-    find_recursive/3,find_recursive/4,
+    search/2,search/3,
     create_certificate/1
 ]).
 
@@ -153,55 +151,11 @@ write_item(PID, Item, Value, Timeout)->
         Error -> Error
     end.
 
-browse_folder(PID, Path, Offset, Limit)->
-    browse_folder(PID, Path, Offset, Limit, undefined).
-browse_folder(PID, Path, Offset, Limit, Timeout)->
-    Args = #{
-        path => Path,
-        offset => Offset,
-        limit => Limit
-    },
-    eport_c:request( PID, <<"browse_folder">>, Args, Timeout ).
 
-items_tree(PID)->
-    items_tree(PID, undefined).
-items_tree(PID, Timeout)->
-    try
-        {ok, items_tree(PID,Timeout,_Path = <<>>)}
-    catch
-        _:Error-> {error, Error}
-    end.
-items_tree(PID,Timeout,Path)->
-    case browse_folder(PID,Path, _Offset = undefined, _Limit = undefined, Timeout) of
-        {ok,Items}->
-            PathPrefix =
-                if
-                    Path =:= <<>> -> <<>>;
-                    true -> <<Path/binary,"/">>
-                end,
-            maps:fold(fun(Name,Item,Acc)->
-                if
-                    Item =:= ?FOLDER_TYPE ->
-                        Acc#{Name => items_tree(PID,Timeout,<<PathPrefix/binary,Name/binary>>)};
-                    Item =:= ?TAG_TYPE ->
-                        Acc#{Name => Item};
-                    true ->
-                        % Ignore other types
-                        Acc
-                end
-            end,#{},Items);
-        {error,Error}->
-            throw(Error)
-    end.
-
-find_recursive(PID, Context, Search)->
-    find_recursive(PID, Context, Search, undefined).
-find_recursive(PID, Context, Search, Timeout)->
-    Args = #{
-        context => Context,
-        search => Search
-    },
-    eport_c:request( PID, <<"find_recursive">>, Args, Timeout ).
+search(PID, Search)->
+    search(PID, Search, undefined).
+search(PID, Search, Timeout)->
+    eport_c:request( PID, <<"search">>, Search, Timeout ).
 
 create_certificate( Name )->
     Priv = code:priv_dir(eopcua),

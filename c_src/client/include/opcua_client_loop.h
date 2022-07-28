@@ -15,12 +15,20 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#ifndef eopcua_server_config__h
-#define eopcua_server_config__h
 
-#include <open62541/server_config_default.h>
+#ifndef eopcua_client_loop__h
+#define eopcua_client_loop__h
+
 #include <eport_c.h>
 
-char *configure(UA_ServerConfig *config, cJSON* args);
+char *start(char *url, char *certificate, char *privateKey, char *login, char *pass, uint cycle, size_t maxNodesPerBrowse);
+void stop(void);
+bool is_started(void);
+
+char* browse_servers(char *host, int port, char ***urls);
+
+char *read_value(char *path, cJSON **value);
+char *write_value(char *path, cJSON *value);
+
 
 #endif

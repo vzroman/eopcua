@@ -15,12 +15,22 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#ifndef eopcua_server_config__h
-#define eopcua_server_config__h
 
-#include <open62541/server_config_default.h>
-#include <eport_c.h>
+#ifndef eopcua_client_browse_cache__h
+#define eopcua_client_browse_cache__h
 
-char *configure(UA_ServerConfig *config, cJSON* args);
+#include <open62541/types.h>
+
+typedef struct {
+  char *path;
+  UA_NodeId *nodeId;
+  int nodeClass;
+} opcua_item;
+
+char *add_cache(char *path, UA_NodeId *nodeId, int nodeClass);
+UA_NodeId *lookup_path2nodeId_cache(char *path);
+char *lookup_nodeId2path_cache(UA_NodeId *nodeId);
+opcua_item * get_all_cache_items(void);
+void purge_cache(void);
 
 #endif

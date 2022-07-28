@@ -15,12 +15,14 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#ifndef eopcua_server_config__h
-#define eopcua_server_config__h
 
-#include <open62541/server_config_default.h>
-#include <eport_c.h>
+#ifndef eopcua_server_nodes__h
+#define eopcua_server_nodes__h
 
-char *configure(UA_ServerConfig *config, cJSON* args);
+#include <open62541/types.h>
+
+char *create_node(char *path, UA_NodeId **nodeId);
+UA_NodeId *lookup_node(char *path);
+void purge_nodes(void);
 
 #endif

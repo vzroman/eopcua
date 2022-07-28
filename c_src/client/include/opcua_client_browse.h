@@ -15,12 +15,16 @@
 * specific language governing permissions and limitations
 * under the License.
 ----------------------------------------------------------------*/
-#ifndef eopcua_server_config__h
-#define eopcua_server_config__h
 
-#include <open62541/server_config_default.h>
-#include <eport_c.h>
+#ifndef eopcua_client_browse__h
+#define eopcua_client_browse__h
 
-char *configure(UA_ServerConfig *config, cJSON* args);
+#include <open62541/types.h>
+#include <open62541/client_highlevel.h>
+#include "opcua_client_browse_cache.h"
+
+char *build_browse_cache(UA_Client *client,size_t maxNodesPerBrowse);
+char *path2nodeId( char *path, UA_NodeId *nodeId );
+
 
 #endif
