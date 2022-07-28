@@ -249,8 +249,12 @@ char *read_value(UA_NodeId *nodeId, cJSON **value){
         return (char*)UA_StatusCode_name( sc );
     }
 
-    *value = ua2json( ua_value.type, ua_value.data );
-    if (!*value ) return "data type is no supported";
+    if(UA_Variant_isEmpty(&ua_value)){
+        *value = cJSON_CreateNull();
+    }else{
+        *value = ua2json( ua_value.type, ua_value.data );
+        if (!*value ) return "data type is no supported";
+    }
 
     return NULL;
 }
