@@ -205,36 +205,89 @@ on_error:
 
 static cJSON* opcua_client_read_items(cJSON* args, char **error){
     LOGTRACE("read items");
-    cJSON *response = cJSON_CreateArray();
+    cJSON *response = NULL;
     cJSON *item = NULL;
-    cJSON *result = NULL;
+
+    UA_NodeId **nodeId = NULL;
+    UA_DataValue *values = NULL;
+    size_t valid = 0;
 
     if (!is_started()){
         *error = "no connection";
-        goto on_error;
+        goto on_clear;
     }
 
     //-----------validate the arguments-----------------------
     if ( !cJSON_IsArray(args) ) {
         *error = "invalid read arguments";
-        goto on_error;
+        goto on_clear;
+    }
+
+    size_t size = cJSON_GetArraySize( args );
+
+    nodeId = malloc( size * sizeof(UA_NodeId *));
+    if(!nodeId){
+        *error = "out of memory";
+        goto on_clear;
+    }
+
+    response = cJSON_CreateObject();
+    if (!response){
+        *error = "unable to create response object";
+        goto on_clear;
     }
 
     cJSON_ArrayForEach(item, args) {
-        result = opcua_client_read_item( item, error );
-        if (result == NULL){
-            char _error[strlen(*error) + strlen("error: ") + 1];
-            sprintf(_error,"error: %s",*error); 
-            result = cJSON_CreateString(_error);
-        }
-        if ( !cJSON_AddItemToArray(response, result) ){
-            *error = "unable add a result for item";
-            goto on_error;
+        UA_NodeId *n = lookup_path2nodeId_cache( item->valuestring );
+        if (!n){
+            if (!cJSON_AddStringToObject(response, item->valuestring, "error: invalid node")){
+                *error = "unable to add item to response";
+                goto on_clear;
+            }
+        }else{
+            //LOGINFO("DEBUG: add to valid %s",item->valuestring);
+            nodeId[valid++] = n;
         }
     }
 
-    return response;
-on_error:
+    *error = read_values(valid, nodeId, &values);
+    if (*error) goto on_clear;
+
+    for(size_t i=0; i<valid; i++){
+
+        char *path = lookup_nodeId2path_cache(nodeId[i]);
+        //LOGINFO("DEBUG: result for %s",path);
+        
+        if (values[i].status != UA_STATUSCODE_GOOD){
+            char *e = (char*)UA_StatusCode_name( values[i].status );
+            char _err[strlen(e) + 8]; // error: 
+            sprintf(_err,"error: %s",e);
+            if (!cJSON_AddStringToObject(response, path, _err)){
+                *error = "unable to add item to response";
+                goto on_clear;
+            }
+        }else{
+            cJSON *value = ua2json( values[i].value.type, values[i].value.data );
+            if(!value){
+                if (!cJSON_AddStringToObject(response, path, "error: invalid value")){
+                    *error = "unable to add item to response";
+                    goto on_clear;
+                }
+            }else{
+                if (!cJSON_AddItemToObject(response, path, value)){
+                    *error = "unable to add item to response";
+                    goto on_clear;
+                }
+            }
+        }
+    }
+
+on_clear:
+    if(nodeId) free(nodeId);
+    if(values) UA_Array_delete(values, valid, &UA_TYPES[UA_TYPES_DATAVALUE]);
+
+    if(!*error) return response;
+
     cJSON_Delete( response );
     return NULL;
 }

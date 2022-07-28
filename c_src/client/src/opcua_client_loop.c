@@ -92,6 +92,56 @@ on_error:
     LOGERROR("unable to update subscription %d: %s",monId, error);
 }
 
+char *read_values(size_t size, UA_NodeId **nodeId, UA_DataValue **values){
+    char *error = NULL;
+
+    UA_ReadRequest request;
+    UA_ReadRequest_init(&request);
+
+    request.nodesToRead = UA_Array_new(size, &UA_TYPES[UA_TYPES_READVALUEID]);
+    if (!request.nodesToRead){
+        error = "out of memory";
+        goto on_clear;
+    }
+    for (size_t i=0; i < size; i++){
+        //LOGINFO("DEBUG: add node to request %lu",i);
+        UA_ReadValueId_init(&request.nodesToRead[i]);
+        UA_NodeId_copy(nodeId[i], &request.nodesToRead[i].nodeId );
+        request.nodesToRead[i].nodeId = *nodeId[i];
+        request.nodesToRead[i].attributeId = UA_ATTRIBUTEID_VALUE;
+    }
+    request.nodesToReadSize = size;    
+    
+    // Get the lock
+    pthread_mutex_lock(&opcua_client.lock);
+    UA_ReadResponse response = UA_Client_Service_read(opcua_client.client, request);
+    pthread_mutex_unlock(&opcua_client.lock);
+
+    UA_StatusCode sc = response.responseHeader.serviceResult;
+    //LOGINFO("DEBUG: response %s",UA_StatusCode_name( sc ));
+    if(sc != UA_STATUSCODE_GOOD) {
+        error = (char*)UA_StatusCode_name( sc );
+        goto on_clear;
+    }
+
+    if(response.resultsSize != size){
+        error = "invalid response results size";
+        goto on_clear;
+    }
+    
+    sc = UA_Array_copy(response.results, size, (void **)values, &UA_TYPES[UA_TYPES_DATAVALUE]);
+    //LOGINFO("DEBUG: copy results status %s",UA_StatusCode_name( sc ));
+    if(sc != UA_STATUSCODE_GOOD) {
+        error = (char*)UA_StatusCode_name( sc );
+        goto on_clear;
+    }
+
+on_clear:
+    UA_ReadRequest_clear(&request);
+    UA_ReadResponse_clear(&response);
+    return error;
+}
+
 static char *register_subscription(char *path){
     LOGINFO("create a new subscription %s",path);
 

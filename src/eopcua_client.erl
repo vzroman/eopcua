@@ -108,13 +108,15 @@ read_items(PID, Items, Timeout) when is_map( Items )->
 read_items(PID, Items, Timeout)->
     case eport_c:request( PID, <<"read_items">>, Items, Timeout ) of
         {ok, Values}->
-            Values1 = 
-                [ case V of
-                    <<"error: ", ItemError/binary>>->
-                        {error, ItemError};
-                    _-> V
-                  end || V <- Values ],
-            { ok, maps:from_list(lists:zip( Items, Values1 )) };
+            Values1 =
+                maps:map(fun(_K,V)->
+                    case V of
+                        <<"error: ", ItemError/binary>>->
+                            {error, ItemError};
+                        _-> V
+                    end
+                end, Values),
+            { ok, Values1 };
         Error->
             Error
     end.
