@@ -156,8 +156,9 @@ static cJSON* opcua_server_read_item(cJSON* args, char **error){
 
     UA_NodeId *nodeId = lookup_node( args->valuestring );
     if (!nodeId){
-        *error = "invalid node";
-        goto on_error;
+        LOGINFO("create new node %s",args->valuestring);
+        *error = create_node( args->valuestring, &nodeId );
+        if (*error) goto on_error;
     }
 
     cJSON *value = NULL;
