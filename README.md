@@ -33,8 +33,6 @@ Client Example
     {ok,Port} = eopcua_client:start_link(<<"my_connection">>).
     
     {ok,ServerList} = eopcua_client:browse_servers(Port, #{ host=> <<"localhost">>, port => 53530 } ).
-
-    {ok,ServerList} = eopcua_client:browse_servers(Port, #{ host=> <<"192.168.2.18">>, port => 4841 } ).
     
     ok = eopcua_client:connect(Port, #{ url => hd(ServerList), max_nodes_per_browse => 1000 }).
 
@@ -83,7 +81,8 @@ Client Encrypted Connection
         certificate => base64:encode(Cert),     % Certificated in der format
         private_key => base64:encode(Key),      % Private key in pem format
         login => <<"test_user">>, 
-        password => <<"111111">> 
+        password => <<"111111">>,
+        max_nodes_per_browse => 1000
     }).
 
 Server Config 
