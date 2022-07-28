@@ -86,7 +86,8 @@ static cJSON* opcua_server_write_item(cJSON* args, char **error){
 
     UA_NodeId *nodeId = lookup_node( path->valuestring );
     if (!nodeId){
-        *error = create_node( path->valuestring, type->valuestring, &nodeId );
+        LOGINFO("create new node %s",path->valuestring);
+        *error = create_node( path->valuestring, &nodeId );
         if (*error) goto on_error;
     }
 

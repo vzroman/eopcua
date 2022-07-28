@@ -22,9 +22,6 @@
 #include "opcua_server_loop.h"
 #include "opcua_server_nodes.h"
 
-//DEBUG:
-#include <eport_c.h>
-
 typedef struct {
   char *path;
   UA_NodeId *nodeId;
@@ -92,8 +89,6 @@ static char *ensure_path(char **path, UA_NodeId folder, char* context, UA_NodeId
 
     char *name = *path;
 
-    LOGINFO("DEBUG: ensure_path %s",name);
-
     int l = strlen(name);
     if(context){
         l += strlen(context) + 1;
@@ -104,20 +99,15 @@ static char *ensure_path(char **path, UA_NodeId folder, char* context, UA_NodeId
     }else{
         sprintf(_path,"%s",name);
     }
-    LOGINFO("DEBUG: _path %s",_path);
 
     *outNodeId = lookup_node( _path );
     if(!*outNodeId) {
-        LOGINFO("DEBUG: add_folder %s",_path);
         UA_NodeId _outNodeId;
         char *error = add_folder(folder, name, &_outNodeId);
-        LOGINFO("DEBUG: add_folder error %s, nodeId %d",error,!UA_NodeId_isNull(&_outNodeId));
         if(error) return error;
 
         error = add_node(_path, _outNodeId, outNodeId);
         if(error) return error;
-    }else{
-        LOGINFO("DEBUG: node already exists %s",_path);
     }
 
     if (*(path + 1)){
@@ -127,19 +117,11 @@ static char *ensure_path(char **path, UA_NodeId folder, char* context, UA_NodeId
     return NULL;
 }
 
-char *create_node(char *path, char *type, UA_NodeId **outNodeId){
+char *create_node(char *path, UA_NodeId **outNodeId){
     char *error = NULL;
 
     char *name = NULL; 
     char **tokens = NULL;
-
-    LOGINFO("DEBUG: create_node %s",path);
-
-    const UA_DataType *ua_type = type2ua( type );
-    if (ua_type == NULL){
-        error = "unsupported data type";
-        goto on_clear;
-    }
 
     UA_NodeId *folder;
     tokens = str_split( path, '/');
@@ -148,8 +130,6 @@ char *create_node(char *path, char *type, UA_NodeId **outNodeId){
         int depth = 0; while (*(tokens + depth)) depth++;
         name = *(tokens + depth -1);
         *(tokens + depth -1) = NULL;
-
-        LOGINFO("DEBUG: name %s, depth %d",name, depth);
 
         // Create a folder if not exists
         error = ensure_path(tokens, UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER), NULL, &folder);
@@ -162,7 +142,7 @@ char *create_node(char *path, char *type, UA_NodeId **outNodeId){
     }
 
     UA_NodeId _outNodeId;
-    error = add_variable(*folder, name, ua_type, &_outNodeId);
+    error = add_variable(*folder, name, &_outNodeId);
     if (error) goto on_clear;
 
     error = add_node(path, _outNodeId, outNodeId);

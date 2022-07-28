@@ -26,7 +26,7 @@ char* start(cJSON *args);
 void stop(void);
 bool is_started(void);
 
-char *add_variable(UA_NodeId folder, char *name, const UA_DataType *type, UA_NodeId *outNodeId);
+char *add_variable(UA_NodeId folder, char *name, UA_NodeId *outNodeId);
 char *add_folder(UA_NodeId folder, char *name, UA_NodeId *outNodeId);
 
 char *write_value(UA_NodeId *nodeId, char *type, cJSON *value);

@@ -21,7 +21,7 @@
 
 #include <open62541/types.h>
 
-char *create_node(char *path, char *type, UA_NodeId **nodeId);
+char *create_node(char *path, UA_NodeId **nodeId);
 UA_NodeId *lookup_node(char *path);
 void purge_nodes(void);
 

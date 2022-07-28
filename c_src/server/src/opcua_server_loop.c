@@ -133,7 +133,7 @@ bool is_started(){
     return opcua_server.run;
 }
 
-char *add_variable(UA_NodeId folder, char *name, const UA_DataType *type, UA_NodeId *outNodeId){
+char *add_variable(UA_NodeId folder, char *name, UA_NodeId *outNodeId){
     
     UA_VariableAttributes attr = UA_VariableAttributes_default;
     attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
