@@ -94,48 +94,13 @@ connect(PID, Params, Timeout)->
 
 read_items(PID, Items)->
     read_items(PID, Items, undefined).
-read_items(PID, Items, Timeout) when is_map( Items )->
-    Items1 = maps:to_list( Items ),
-    case read_items( PID, Items1, Timeout ) of
-        {ok, Results}->
-            Results1 = maps:from_list(lists:zip( Items1, Results )),
-            {ok, Results1};
-        Error->
-            Error
-    end;
 read_items(PID, Items, Timeout)->
-    case eport_c:request( PID, <<"read_items">>, Items, Timeout ) of
-        {ok, Values}->
-            Values1 =
-                maps:map(fun(_K,V)->
-                    case V of
-                        <<"error: ", ItemError/binary>>->
-                            {error, ItemError};
-                        _-> V
-                    end
-                end, Values),
-            { ok, Values1 };
-        Error->
-            Error
-    end.
+    eport_c:request( PID, <<"read_items">>, Items, Timeout ).
 
 write_items(PID, Items)->
     write_items(PID, Items, undefined).
 write_items(PID, Items, Timeout)->
-    case eport_c:request( PID, <<"write_items">>, Items, Timeout ) of
-        {ok, Results}->
-            Results1 =
-                maps:map(fun(_K,V)->
-                    case V of
-                        <<"error: ", ItemError/binary>>->
-                            {error, ItemError};
-                        _-> ok
-                    end
-                end, Results),
-            { ok, Results1 };
-        Error->
-            Error
-    end.
+    eport_c:request( PID, <<"write_items">>, Items, Timeout ).
 
 
 search(PID, Search)->

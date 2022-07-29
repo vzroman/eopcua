@@ -179,6 +179,21 @@ on_error:
     return NULL;
 }
 
+static cJSON* item_read_result(UA_DataValue value){
+
+    if (value.status != UA_STATUSCODE_GOOD) return cJSON_CreateString( UA_StatusCode_name( value.status ) );
+    
+    cJSON *_value = ua2json( value.value.type, value.value.data );
+    if (!_value) return cJSON_CreateString("invalid value");
+
+    cJSON *result = cJSON_CreateObject();
+    
+    cJSON_AddStringToObject(result,"type",value.value.type->typeName);
+    cJSON_AddItemToObject(result,"value",_value);
+
+    return result;
+}
+
 static cJSON* opcua_client_read_items(cJSON* args, char **error){
     LOGTRACE("read items");
     cJSON *response = NULL;
@@ -216,10 +231,7 @@ static cJSON* opcua_client_read_items(cJSON* args, char **error){
     cJSON_ArrayForEach(item, args) {
         UA_NodeId *n = lookup_path2nodeId_cache( item->valuestring );
         if (!n){
-            if (!cJSON_AddStringToObject(response, item->valuestring, "error: invalid node")){
-                *error = "unable to add item to response";
-                goto on_clear;
-            }
+            cJSON_AddStringToObject(response, item->valuestring, "invalid node");
         }else{
             nodeId[valid++] = n;
         }
@@ -231,29 +243,9 @@ static cJSON* opcua_client_read_items(cJSON* args, char **error){
     for(size_t i=0; i<valid; i++){
 
         char *path = lookup_nodeId2path_cache(nodeId[i]);
+
+        cJSON_AddItemToObject(response, path, item_read_result(values[i]));
         
-        if (values[i].status != UA_STATUSCODE_GOOD){
-            char *e = (char*)UA_StatusCode_name( values[i].status );
-            char _err[strlen(e) + 8]; // error: 
-            sprintf(_err,"error: %s",e);
-            if (!cJSON_AddStringToObject(response, path, _err)){
-                *error = "unable to add item to response";
-                goto on_clear;
-            }
-        }else{
-            cJSON *value = ua2json( values[i].value.type, values[i].value.data );
-            if(!value){
-                if (!cJSON_AddStringToObject(response, path, "error: invalid value")){
-                    *error = "unable to add item to response";
-                    goto on_clear;
-                }
-            }else{
-                if (!cJSON_AddItemToObject(response, path, value)){
-                    *error = "unable to add item to response";
-                    goto on_clear;
-                }
-            }
-        }
     }
 
 on_clear:
@@ -309,53 +301,42 @@ static cJSON* opcua_client_write_items(cJSON* args, char **error){
     }
 
     cJSON_ArrayForEach(item, args) {
-        if (!cJSON_IsObject(item->child)){
-            if (!cJSON_AddStringToObject(response, item->string, "error: invalid arguments")){
-                *error = "unable to add item to response";
-                goto on_clear;
-            } 
+        if (!cJSON_IsObject(item)){
+            cJSON_AddStringToObject(response, item->string, "invalid arguments");
+            continue;
         }
 
         cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
         if (!cJSON_IsString(type) || (type->valuestring == NULL)){
-            if (!cJSON_AddStringToObject(response, item->string, "error: type not provided")){
-                *error = "unable to add item to response";
-                goto on_clear;
-            } 
+            cJSON_AddStringToObject(response, item->string, "type not provided");
+            continue;
         }
 
         cJSON *value = cJSON_GetObjectItemCaseSensitive(item, "value");
-        if (value == NULL){
-            if (!cJSON_AddStringToObject(response, item->string, "error: value not provided")){
-                *error = "unable to add item to response";
-                goto on_clear;
-            }
+        if (!value){
+            cJSON_AddStringToObject(response, item->string, "value not provided");
+            continue;
         }
 
         UA_NodeId *n = lookup_path2nodeId_cache( item->string );
-        const UA_DataType *ua_type = type2ua( type->valuestring );
         if (!n){
-            if (!cJSON_AddStringToObject(response, item->string, "error: invalid node")){
-                *error = "unable to add item to response";
-                goto on_clear;
-            }
-        }else if(!ua_type){
-            if (!cJSON_AddStringToObject(response, item->string, "error: unsupported type")){
-                *error = "unable to add item to response";
-                goto on_clear;
-            }
-        }else{
-            UA_Variant *ua_value = json2ua(ua_type, value);
-            if (!ua_value){
-                if (!cJSON_AddStringToObject(response, item->string, "error: invalid value")){
-                    *error = "unable to add item to response";
-                    goto on_clear;
-                }
-            }else{
-                nodeId[valid] = n;
-                values[valid++] = ua_value;
-            }
+            cJSON_AddStringToObject(response, item->string, "invalid node");
+            continue;
         }
+        const UA_DataType *ua_type = type2ua( type->valuestring );
+        if(!ua_type){
+            cJSON_AddStringToObject(response, item->string, "unsupported type");
+            continue;
+        }
+        UA_Variant *ua_value = json2ua(ua_type, value);
+        if (!ua_value){
+            cJSON_AddStringToObject(response, item->string, "invalid value");
+            continue;
+
+        }
+
+        nodeId[valid] = n;
+        values[valid++] = ua_value;
     }
 
     if(!valid) goto on_clear;
@@ -368,17 +349,9 @@ static cJSON* opcua_client_write_items(cJSON* args, char **error){
         char *path = lookup_nodeId2path_cache(nodeId[i]);
 
         if (results[i]){
-            char _err[strlen(results[i]) + 8]; // error: 
-            sprintf(_err,"error: %s",results[i]);
-            if (!cJSON_AddStringToObject(response, path, _err)){
-                *error = "unable to add item to response";
-                goto on_clear;
-            }
+            cJSON_AddStringToObject(response, path, results[i]);
         }else{
-            if (!cJSON_AddStringToObject(response, path, "ok")){
-                *error = "unable to add item to response";
-                goto on_clear;
-            }
+            cJSON_AddStringToObject(response, path, "ok");
         }
     }
 
