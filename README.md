@@ -67,7 +67,7 @@ Client Example
     }).
 
     {ok,#{
-        <<"StaticData/AnalogItems/Int32AnalogItem">> := ok,
+        <<"StaticData/AnalogItems/Int32AnalogItem">> := <<"ok">>,
         <<"StaticData/AnalogItems/ItDoesnNotExist">> := <<"invalid node">>
     }} = eopcua_client:write_items(Port, #{
         <<"StaticData/AnalogItems/Int32AnalogItem">> => #{type => <<"Int32">>, value => 65}, 
@@ -173,27 +173,33 @@ Server Example
         }
     }).
     
-    ok = eopcua_server:write_item(Port, #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 45.67}).
+    {ok,#{<<"TAGS/my_folder/temperature">> := <<"ok">>}} = eopcua_server:write_items(Port, #{
+        <<"TAGS/my_folder/temperature">> => #{type => <<"Double">>, value => 45.67}
+    }).
 
     {ok, #{
-        <<"TAGS/my_folder/temperature">> := ok,
-        <<"TAGS/my_folder/pressure">> := ok         % or it can be {error, Error}
-    }} = eopcua_server:write_items(Port, [
-        #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 34.56},
-        #{path => <<"TAGS/my_folder/pressure">>, type => <<"UInt32">>, value => 87}
-    ]).
-
-    {ok, Temperature} = eopcua_server:read_item(Port, <<"TAGS/my_folder/temperature">>).
+        <<"TAGS/my_folder/temperature">> := <<"unsupported data type">>,
+        <<"TAGS/my_folder/pressure">> := <<"ok">>       
+    }} = eopcua_server:write_items(Port, #{
+        <<"TAGS/my_folder/temperature">> => #{type => <<"SomeType">>, value => 34.56},
+        <<"TAGS/my_folder/pressure">> => #{type => <<"UInt32">>, value => 87}
+    }).
 
     {ok, #{
-        <<"TAGS/my_folder/temperature">> := Temperature,
-        <<"TAGS/my_folder/pressure">> := Pressure         % or it can be {error, Error}
+        <<"TAGS/my_folder/temperature">> := #{ <<"type">> := <<"Double">>, <<"value">> := 45.67 }
+    }} = eopcua_server:read_items(Port, [<<"TAGS/my_folder/temperature">>]).
+
+    {ok, #{
+        <<"TAGS/my_folder/temperature">> := #{ <<"type">> := <<"Double">>, <<"value">> := 45.67 },
+        <<"TAGS/my_folder/pressure">> := #{type := <<"UInt32">>, value := 87}
     }} = eopcua_server:read_items(Port, [
         <<"TAGS/my_folder/temperature">>,
         <<"TAGS/my_folder/pressure">>
     ]).
 
     ok = eopcua_server:set_log_level(Port, debug).  #; trace, debug, info, warning, error, fatal
+
+    eopcua_server:stop(Port).
 
 Server Encrypted Connection
 -----

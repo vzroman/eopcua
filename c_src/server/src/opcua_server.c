@@ -45,167 +45,98 @@ static cJSON* opcua_server_start(cJSON* args, char **error){
     return cJSON_CreateString("ok");
 }
 
-//-------------------------------------------------------------
-//  The entry point for creating and chnging values for nodes.
-//  It waits args in the next format:
-//  {
-//      "path": "some/path/to/my/variable",
-//      "type": "UInt32",
-//      "value": 56
-//  }
-//  If the node is already added to the server the mtheod 
-//  changes its value. If the path doesn't exist yet the node
-//  is created and the value is set.
-//-------------------------------------------------------------
-static cJSON* opcua_server_write_item(cJSON* args, char **error){
-    LOGTRACE("write item");
+static char *write_item(cJSON *item){
+    LOGTRACE("write item %s",item->string);
 
-    if (!is_started()){
-        *error = "server not started";
-        goto on_error;
-    }
+    if(!cJSON_IsObject(item)) return "invalid arguments";
 
-    //-----------validate the arguments-----------------------
-    cJSON *path = cJSON_GetObjectItemCaseSensitive(args, "path");
-    if (!cJSON_IsString(path) || (path->valuestring == NULL)){
-        *error = "path is not defined";
-        goto on_error; 
-    }
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+    if (!cJSON_IsString(type) || (!type->valuestring)) return "type not provided";
 
-    cJSON *type = cJSON_GetObjectItemCaseSensitive(args, "type");
-    if (!cJSON_IsString(type) || (type->valuestring == NULL)){
-        *error = "type is not defined";
-        goto on_error; 
-    }
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(item, "value");
+    if (value == NULL) return "value is not provided";
 
-    cJSON *value = cJSON_GetObjectItemCaseSensitive(args, "value");
-    if (value == NULL){
-        *error = "value is not defined";
-        goto on_error; 
-    }
-
-    UA_NodeId *nodeId = lookup_node( path->valuestring );
+    UA_NodeId *nodeId = lookup_node( item->string );
     if (!nodeId){
-        LOGINFO("create new node %s",path->valuestring);
-        *error = create_node( path->valuestring, &nodeId );
-        if (*error) goto on_error;
+        LOGINFO("create new node %s",item->string);
+        char *error = create_node( item->string, &nodeId );
+        if (error) return error;
     }
 
     // write the value
-    *error = write_value(nodeId, type->valuestring, value );
-    if (*error) goto on_error;
-
-    return cJSON_CreateString("ok");
-
-on_error:
-    return NULL;
+    return write_value(nodeId, type->valuestring, value );
 }
 
 static cJSON* opcua_server_write_items(cJSON* args, char **error){
     LOGTRACE("write items");
 
-    cJSON *response = NULL;
-    cJSON *item = NULL;
-    cJSON *result = NULL;
-
     if (!is_started()){
         *error = "server not started";
-        goto on_error;
+        return NULL;
     }
 
     //-----------validate the arguments-----------------------
-    if ( !cJSON_IsArray(args) ) {
+    if ( !cJSON_IsObject(args) ) {
         *error = "invalid write arguments";
-        goto on_error;
+        return NULL;
     }
 
-    response = cJSON_CreateArray();
+    cJSON *response = cJSON_CreateObject();
 
+    cJSON *item = NULL; char *err = NULL;
     cJSON_ArrayForEach(item, args) {
-        result = opcua_server_write_item( item, error );
-        if (result == NULL){
-            char _error[strlen(*error) + strlen("error: ") +1 ];
-            sprintf(_error,"error: %s",*error); 
-            result = cJSON_CreateString(_error);
-        }
-        if ( !cJSON_AddItemToArray(response, result) ){
-            *error = "unable add a result for item";
-            goto on_error;
+        err = write_item( item );
+        if (err){
+            cJSON_AddStringToObject( response, item->string, err );
+        }else{
+            cJSON_AddStringToObject( response, item->string, "ok" );
         }
     }
 
     return response;
-on_error:
-    cJSON_Delete( response );
-    return NULL;
 }
 
-static cJSON* opcua_server_read_item(cJSON* args, char **error){
-    LOGTRACE("read item");
+static char* read_item(char* item, cJSON **value){
+    LOGTRACE("read item %s",item);
 
-    if (!is_started()){
-        *error = "server not started";
-        goto on_error;
-    }
-
-    //-----------validate the arguments-----------------------
-    if (!cJSON_IsString(args) || (args->valuestring == NULL)){
-        *error = "item is not defined";
-        goto on_error; 
-    }
-
-    UA_NodeId *nodeId = lookup_node( args->valuestring );
+    UA_NodeId *nodeId = lookup_node( item );
     if (!nodeId){
-        LOGINFO("create new node %s",args->valuestring);
-        *error = create_node( args->valuestring, &nodeId );
-        if (*error) goto on_error;
+        LOGINFO("create new node %s",item);
+        char *error = create_node( item, &nodeId );
+        if (error) return error;
     }
 
-    cJSON *value = NULL;
-    *error = read_value( nodeId, &value );
-    if (*error) goto on_error;
-
-    return value;
-
-on_error:
-    return NULL;
+    return read_value( nodeId, value );
 }
 
 static cJSON* opcua_server_read_items(cJSON* args, char **error){
     LOGTRACE("read items");
-    cJSON *response = NULL;
-    cJSON *item = NULL;
-    cJSON *result = NULL;
 
     if (!is_started()){
         *error = "server not started";
-        goto on_error;
+        return NULL;
     }
 
     //-----------validate the arguments-----------------------
     if ( !cJSON_IsArray(args) ) {
         *error = "invalid arguments";
-        goto on_error;
+        return NULL;
     }
 
-    response = cJSON_CreateArray();
+    cJSON *response = cJSON_CreateObject();
+    char *err = NULL;
+
+    cJSON *item = NULL;  cJSON *result = NULL;
     cJSON_ArrayForEach(item, args) {
-        result = opcua_server_read_item( item, error );
-        if (result == NULL){
-            char _error[strlen(*error) + strlen("error: ") + 1];
-            sprintf(_error,"error: %s",*error); 
-            result = cJSON_CreateString(_error);
-        }
-        if ( !cJSON_AddItemToArray(response, result) ){
-            *error = "unable add a result for item";
-            goto on_error;
+        err = read_item( item->valuestring, &result );
+        if (err){
+            cJSON_AddStringToObject(response, item->valuestring, err);
+        }else{
+            cJSON_AddItemToObject(response, item->valuestring, result);
         }
     }
 
     return response;
-on_error:
-    cJSON_Delete( response );
-    return NULL;
 }
 
 //-----------------------------------------------------
@@ -221,12 +152,8 @@ static cJSON* on_request( char *method, cJSON *args, char **error ){
         response = opcua_server_start( args, error );
     }else if( strcmp(method, "write_items") == 0){
         response = opcua_server_write_items( args, error );
-    }else if( strcmp(method, "write_item") == 0){
-        response = opcua_server_write_item( args, error );
     }else if( strcmp(method, "read_items") == 0){
         response = opcua_server_read_items( args, error );
-    }else if( strcmp(method, "read_item") == 0){
-        response = opcua_server_read_item( args, error );
     }else{
         *error = "invalid method";
     }

@@ -252,8 +252,12 @@ char *read_value(UA_NodeId *nodeId, cJSON **value){
     if(UA_Variant_isEmpty(&ua_value)){
         *value = cJSON_CreateNull();
     }else{
-        *value = ua2json( ua_value.type, ua_value.data );
-        if (!*value ) return "data type is no supported";
+        cJSON *_value = ua2json( ua_value.type, ua_value.data );
+        if (!_value ) return "data type is no supported";
+
+        *value = cJSON_CreateObject();
+        cJSON_AddStringToObject(*value, "type", ua_value.type->typeName);
+        cJSON_AddItemToObject(*value, "value", _value);
     }
 
     return NULL;
