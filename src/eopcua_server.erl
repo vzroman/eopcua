@@ -34,9 +34,7 @@
 -export([
     server_start/2,
     write_items/2, write_items/3,
-    write_item/2, write_item/3,
     read_items/2, read_items/3,
-    read_item/2, read_item/3,
     create_certificate/1
 ]).
 
@@ -112,36 +110,16 @@ server_start(PID, Params)->
         Error -> Error
     end.
 
-% Items is a list of:
-%   [
-%       #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 45.67},
-%       #{path => <<"TAGS/my_folder/pressure">>, type => <<"UInt32">>, value => 87},
-%   ]
+% Items is a map of:
+%   #{
+%       <<"TAGS/my_folder/temperature">> => #{ type => <<"Double">>, value => 45.67}},
+%       <<"TAGS/my_folder/pressure">> => #{type => <<"UInt32">>, value => 87}}
+%   }
 write_items(PID, Items)->
     write_items(PID, Items, undefined).
 write_items(PID, Items, Timeout)->
-    case eport_c:request( PID, <<"write_items">>, Items, Timeout ) of
-        {ok, Results}->
-            Results1 =
-                [ case V of
-                      <<"error: ", ItemError/binary>>->
-                          {error, ItemError};
-                      _-> ok
-                  end || V <- Results ],
-            { ok, maps:from_list(lists:zip( [I || #{path := I} <- Items], Results1 )) };
-        Error->
-            Error
-    end.
+    eport_c:request( PID, <<"write_items">>, Items, Timeout ).
 
-% Item:
-%   #{path => <<"TAGS/my_folder/temperature">>, type => <<"Double">>, value => 45.67}
-write_item(PID, Item)->
-    write_item(PID, Item, undefined).
-write_item(PID, Item, Timeout)->
-    case eport_c:request( PID, <<"write_item">>, Item, Timeout ) of
-        {ok, <<"ok">>} -> ok;
-        Error -> Error
-    end.
 
 % Items is a list of:
 %   [
@@ -151,28 +129,7 @@ write_item(PID, Item, Timeout)->
 read_items(PID, Items)->
     read_items(PID, Items, undefined).
 read_items(PID, Items, Timeout)->
-    case eport_c:request( PID, <<"read_items">>, Items, Timeout ) of
-        {ok, Results}->
-            Results1 =
-                [ case V of
-                      <<"error: ", ItemError/binary>>->
-                          {error, ItemError};
-                      _-> V
-                  end || V <- Results ],
-            { ok, maps:from_list(lists:zip( Items, Results1 )) };
-        Error->
-            Error
-    end.
-
-% Item:
-%   <<"TAGS/my_folder/temperature">>
-read_item(PID, Item)->
-    read_item(PID, Item, undefined).
-read_item(PID, Item, Timeout)->
-    case eport_c:request( PID, <<"read_item">>, Item, Timeout ) of
-        {ok, <<"ok">>} -> ok;
-        Error -> Error
-    end.
+    eport_c:request( PID, <<"read_items">>, Items, Timeout ).
 
 create_certificate( Name )->
     Priv = code:priv_dir(eopcua),

@@ -27,8 +27,8 @@ bool is_started(void);
 
 char* browse_servers(char *host, int port, char ***urls);
 
-char *read_value(char *path, cJSON **value);
-char *write_value(char *path, cJSON *value);
+char *read_values(size_t size, UA_NodeId **nodeId, UA_DataValue** values);
+char *write_values(size_t size, UA_NodeId **nodeId, UA_Variant **values, char ***results);
 
 
 #endif

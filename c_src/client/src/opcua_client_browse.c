@@ -23,6 +23,7 @@
 
 #include "opcua_client_browse_cache.h"
 #include "opcua_client_browse.h"
+#include "opcua_client_loop.h"
 
 //-----------------------------------------------------
 //  Dynamic Reference Array
@@ -174,7 +175,7 @@ static char *build_browse_cache_inner(UA_Client *client, RefArray *folders, size
                     error = (char*)UA_StatusCode_name( sc );
                     goto on_clear;
                 }
-                
+
                 error = add_cache(path, nodeIdCopy, ref->nodeClass);
                 if (error) goto on_clear; 
 

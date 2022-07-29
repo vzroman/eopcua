@@ -407,10 +407,7 @@ UA_Variant *json2ua(const UA_DataType *type, cJSON *value){
             goto on_error;
         }
     }else{
-        // Try other types as double
-        if (UA_Variant_setScalarCopy( result, &value->valuedouble, type) != UA_STATUSCODE_GOOD){
-            goto on_error;
-        }
+        goto on_error;
     }
     return result;
 

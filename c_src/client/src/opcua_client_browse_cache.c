@@ -97,10 +97,10 @@ char *lookup_nodeId2path_cache(UA_NodeId *nodeId){
     }
 }
 
-opcua_item *get_all_cache_items(){
+opcua_item *get_all_cache_items(size_t *size){
 
-    size_t size = HASH_CNT(hh, __path2nodeId_cache);
-    opcua_item *items = (opcua_item *)malloc( sizeof(opcua_item) * (size + 1) );
+    *size = HASH_CNT(hh, __path2nodeId_cache);
+    opcua_item *items = (opcua_item *)malloc( sizeof(opcua_item) * (*size) );
 
     opcua_client_path2nodeId_cache *path2NodeId; size_t i = 0;
     for (path2NodeId= __path2nodeId_cache; path2NodeId != NULL; path2NodeId = path2NodeId->hh.next) {
@@ -109,10 +109,6 @@ opcua_item *get_all_cache_items(){
         items[i].nodeClass = path2NodeId->nodeClass;
         i++;
     }
-    // Mark end of array
-    items[i].nodeId = NULL;
-    items[i].path = NULL;
-    items[i].nodeClass = 0;
 
     return items;
 }
