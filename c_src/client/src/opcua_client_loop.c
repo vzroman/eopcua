@@ -24,12 +24,10 @@
 
 #include "utilities.h"
 #include "opcua_client_browse.h"
-#include "opcua_client_subscription.h"
 #include "opcua_client_loop.h"
 
 struct OPCUA_CLIENT {
   UA_Client *client;
-  UA_UInt32 subscriptionId;
   int cycle;
   pthread_mutex_t lock;
   bool run;
@@ -38,182 +36,12 @@ struct OPCUA_CLIENT {
 //-----------------------------------------------------
 //  Internal utilities
 //-----------------------------------------------------
-static UA_StatusCode get_connection_state(){
-    
-    const UA_NodeId nodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_SERVER_SERVERSTATUS);
-
-    UA_NodeId dataType;
-    UA_NodeId_init(&dataType);
-
-    return UA_Client_readDataTypeAttribute(opcua_client.client, nodeId, &dataType);
-}
-
-static char *opcua_client_update_subscriptions(){
-    UA_StatusCode status = get_connection_state();
-    if (status != UA_STATUSCODE_GOOD){
-        return (char *)UA_StatusCode_name( status );
-    };
-
-    status = UA_Client_run_iterate(opcua_client.client, 0);
-    if (status != UA_STATUSCODE_GOOD){
-        return (char *)UA_StatusCode_name( status );
-    }
-
-    return NULL;
-}
-
-// callback is called by the open62541 client library
-static void on_subscription_update(UA_Client *client, UA_UInt32 subId, void *subContext,
-                         UA_UInt32 monId, void *monContext, UA_DataValue *value) {
-    LOGTRACE("update subscription %d",monId);
-    char *error;
-    subscription_index *si = NULL;
-    monId2subscription(monId, &si);
-    if (!si) {
-        error = "invalid monId";
-        goto on_error;
-    } 
-
-    // Update the value
-    UA_StatusCode sc = UA_Variant_copy( &value->value, si->value );
-    if (sc != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( sc );
-        goto on_error;
-    }
-    if ( value->status != UA_STATUSCODE_GOOD){
-        si->status = value->status;
-    }else{
-        si->status = sc;
-    }
-
-    return;                
-
-on_error:
-    LOGERROR("unable to update subscription %d: %s",monId, error);
-}
-
-char *read_values(size_t size, UA_NodeId **nodeId, UA_DataValue **values){
-    char *error = NULL;
-
-    UA_ReadRequest request;
-    UA_ReadRequest_init(&request);
-
-    request.nodesToRead = UA_Array_new(size, &UA_TYPES[UA_TYPES_READVALUEID]);
-    if (!request.nodesToRead){
-        error = "out of memory";
-        goto on_clear;
-    }
-    for (size_t i=0; i < size; i++){
-        //LOGINFO("DEBUG: add node to request %lu",i);
-        UA_ReadValueId_init(&request.nodesToRead[i]);
-        UA_NodeId_copy(nodeId[i], &request.nodesToRead[i].nodeId );
-        request.nodesToRead[i].nodeId = *nodeId[i];
-        request.nodesToRead[i].attributeId = UA_ATTRIBUTEID_VALUE;
-    }
-    request.nodesToReadSize = size;    
-    
-    // Get the lock
-    pthread_mutex_lock(&opcua_client.lock);
-    UA_ReadResponse response = UA_Client_Service_read(opcua_client.client, request);
-    pthread_mutex_unlock(&opcua_client.lock);
-
-    UA_StatusCode sc = response.responseHeader.serviceResult;
-    //LOGINFO("DEBUG: response %s",UA_StatusCode_name( sc ));
-    if(sc != UA_STATUSCODE_GOOD) {
-        error = (char*)UA_StatusCode_name( sc );
-        goto on_clear;
-    }
-
-    if(response.resultsSize != size){
-        error = "invalid response results size";
-        goto on_clear;
-    }
-    
-    sc = UA_Array_copy(response.results, size, (void **)values, &UA_TYPES[UA_TYPES_DATAVALUE]);
-    //LOGINFO("DEBUG: copy results status %s",UA_StatusCode_name( sc ));
-    if(sc != UA_STATUSCODE_GOOD) {
-        error = (char*)UA_StatusCode_name( sc );
-        goto on_clear;
-    }
-
-on_clear:
-    UA_ReadRequest_clear(&request);
-    UA_ReadResponse_clear(&response);
-    return error;
-}
-
-static char *register_subscription(char *path){
-    LOGINFO("create a new subscription %s",path);
-
-    char *error = NULL;
-    
-    // Get nodeId
-    UA_NodeId nodeId;
-    error = path2nodeId( path, &nodeId );
-    if (error) goto on_clear;
-
-    UA_NodeId nodeIdCopy;
-    UA_StatusCode sc = UA_NodeId_copy( &nodeId, &nodeIdCopy);
-    if (sc != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( sc );
-        goto on_clear;
-    }
-
-    UA_NodeId typeId;
-    sc = UA_Client_readDataTypeAttribute(opcua_client.client, nodeId, &typeId);
-    if (sc != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( sc );
-        goto on_clear;
-    }
-
-    UA_Variant *nodeValue = UA_Variant_new();
-    UA_StatusCode nodeStatus = UA_Client_readValueAttribute(opcua_client.client, nodeId, nodeValue);
-
-    // Add the binding to the monitored items
-    UA_MonitoredItemCreateRequest monRequest = UA_MonitoredItemCreateRequest_default(nodeId);
-    UA_MonitoredItemCreateResult monResponse =
-    UA_Client_MonitoredItems_createDataChange(opcua_client.client, opcua_client.subscriptionId, UA_TIMESTAMPSTORETURN_BOTH,
-                                            monRequest, NULL, on_subscription_update, NULL);
-
-    sc = monResponse.statusCode;
-    int monId = monResponse.monitoredItemId;
-
-    UA_MonitoredItemCreateRequest_clear(&monRequest);
-    UA_MonitoredItemCreateResult_clear(&monResponse);
-
-    if(sc != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( sc );
-        goto on_clear;
-    }
-
-    error = add_subscription(path, 
-        monId, 
-        &nodeIdCopy, 
-        nodeValue, 
-        nodeStatus, 
-        (UA_DataType *)&UA_TYPES[typeId.identifier.numeric - 1]
-    );
-
-on_clear:
-    return error;
-}
-
-static char *get_subscription(char *path,subscription_index **si){
-    char *error = path2subscription(path, si);
-    if (error){
-        // The subscription might be not registered yet
-        error = register_subscription( path );
-        if (error) return error;
-
-        error = path2subscription(path, si);
-    }
-    return error;
-}
-
 static void *update_loop_thread(void *arg) {
     LOGINFO("starting the update loop thread");
 
     char *error;
+    UA_StatusCode sc;
+
     while(opcua_client.run){
         // Wait for the next cycle
         usleep( opcua_client.cycle );
@@ -223,7 +51,10 @@ static void *update_loop_thread(void *arg) {
         pthread_mutex_lock(&opcua_client.lock);
 
         // Do the update
-        error = opcua_client_update_subscriptions();
+        sc = UA_Client_run_iterate(opcua_client.client, 0);
+        if (sc != UA_STATUSCODE_GOOD){
+            error = (char *)UA_StatusCode_name( sc );
+        }
 
         pthread_mutex_unlock(&opcua_client.lock);
         if (error){
@@ -240,7 +71,6 @@ static void *update_loop_thread(void *arg) {
 
     pthread_mutex_destroy(&opcua_client.lock);
 
-    purge_subscriptions();
     purge_cache();
 
     return NULL;
@@ -248,23 +78,15 @@ static void *update_loop_thread(void *arg) {
 
 static char *init_update_loop(int cycle){
     char *error = NULL;
-    UA_CreateSubscriptionRequest request = UA_CreateSubscriptionRequest_default();
-    UA_CreateSubscriptionResponse response = UA_Client_Subscriptions_create(opcua_client.client, request, NULL, NULL, NULL);
- 
-    opcua_client.subscriptionId = response.subscriptionId;
-    if(response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
-        error = (char *)UA_StatusCode_name( response.responseHeader.serviceResult );
-        goto on_error;
-    }
+
+    opcua_client.run = true;
+    opcua_client.cycle = cycle ? cycle * 1000 : 100000; // default 100 ms
 
     // As the open62541 is not thread safe we use mutex
     if (pthread_mutex_init(&opcua_client.lock, NULL)) {
         error = "mutex init has failed";
         goto on_error;
     }
-
-    opcua_client.run = true;
-    opcua_client.cycle = cycle ? cycle * 1000 : 100000; // default 100 ms
 
     // The server is going to run in a dedicated thread
     pthread_t updateThread;
@@ -282,7 +104,6 @@ static char *init_update_loop(int cycle){
 
 on_error:
     opcua_client.run = false;
-    UA_Client_Subscriptions_deleteSingle(opcua_client.client, opcua_client.subscriptionId);
     return error;
 }
 
@@ -524,61 +345,101 @@ on_clear:
     return NULL;
 }
 
-char *read_value(char *path, cJSON **value){
+char *read_values(size_t size, UA_NodeId **nodeId, UA_DataValue **values){
     char *error = NULL;
-    subscription_index *si = NULL;
 
+    UA_ReadRequest request;
+    UA_ReadRequest_init(&request);
+
+    request.nodesToRead = UA_Array_new(size, &UA_TYPES[UA_TYPES_READVALUEID]);
+    if (!request.nodesToRead){
+        error = "out of memory";
+        goto on_clear;
+    }
+    for (size_t i=0; i < size; i++){
+        UA_ReadValueId_init(&request.nodesToRead[i]);
+        UA_NodeId_copy(nodeId[i], &request.nodesToRead[i].nodeId );
+        request.nodesToRead[i].attributeId = UA_ATTRIBUTEID_VALUE;
+    }
+    request.nodesToReadSize = size;    
+    
     // Get the lock
     pthread_mutex_lock(&opcua_client.lock);
+    UA_ReadResponse response = UA_Client_Service_read(opcua_client.client, request);
+    pthread_mutex_unlock(&opcua_client.lock);
 
-    //  read and write operations always subscribe to the relevant nodes
-    //  to keep their IDs and other needed attributes in the hash table 
-    error = get_subscription(path, &si);
-    if (error) goto on_clear; 
-
-    if (si->status != UA_STATUSCODE_GOOD){
-        error = (char*)UA_StatusCode_name( si->status );
+    UA_StatusCode sc = response.responseHeader.serviceResult;
+    if(sc != UA_STATUSCODE_GOOD) {
+        error = (char*)UA_StatusCode_name( sc );
         goto on_clear;
     }
 
-    *value = ua2json( si->value->type, si->value->data );
-    if (*value == NULL) error = "invalid value";
+    if(response.resultsSize != size){
+        error = "invalid response results size";
+        goto on_clear;
+    }
+    
+    sc = UA_Array_copy(response.results, size, (void **)values, &UA_TYPES[UA_TYPES_DATAVALUE]);
+    if(sc != UA_STATUSCODE_GOOD) {
+        error = (char*)UA_StatusCode_name( sc );
+        goto on_clear;
+    }
 
 on_clear:
-    pthread_mutex_unlock(&opcua_client.lock);
+    UA_ReadRequest_clear(&request);
+    UA_ReadResponse_clear(&response);
     return error;
 }
 
-char *write_value(char *path, cJSON *value){
+char *write_values(size_t size, UA_NodeId **nodeId, UA_Variant **values, char ***results){
     char *error = NULL;
-    subscription_index *si = NULL;
+
+    UA_WriteRequest request;
+    UA_WriteRequest_init(&request);
+
+    request.nodesToWrite = UA_Array_new(size, &UA_TYPES[UA_TYPES_WRITEVALUE]);
+    if (!request.nodesToWrite){
+        error = "out of memory";
+        goto on_clear;
+    }
+    for (size_t i=0; i < size; i++){
+        UA_WriteValue_init(&request.nodesToWrite[i]);
+        UA_NodeId_copy(nodeId[i], &request.nodesToWrite[i].nodeId );
+        request.nodesToWrite[i].attributeId = UA_ATTRIBUTEID_VALUE;
+        request.nodesToWrite[i].value.value = *values[i];
+        request.nodesToWrite[i].value.hasValue = true;
+    }
+    request.nodesToWriteSize = size;
 
     // Get the lock
-    pthread_mutex_lock(&opcua_client.lock); 
+    pthread_mutex_lock(&opcua_client.lock);
+    UA_WriteResponse response = UA_Client_Service_write(opcua_client.client, request);
+    pthread_mutex_unlock(&opcua_client.lock);
 
-    //  read and write operations always subscribe to the relevant nodes
-    //  to keep their IDs and other needed attributes in the hash table 
-    error = get_subscription(path, &si);
-    if(error) goto on_clear;
-
-    UA_DataType *type = si->type;
-    if (si->value && si->value->type){
-        type = (UA_DataType *)si->value->type;
+    UA_StatusCode sc = response.responseHeader.serviceResult;
+    if(sc != UA_STATUSCODE_GOOD) {
+        error = (char*)UA_StatusCode_name( sc );
+        goto on_clear;
     }
-
-    UA_Variant *ua_value = json2ua(type, value);
-    if ( ua_value == NULL ){
-        error = "invalid value";
+    if(response.resultsSize != size){
+        error = "invalid response results size";
         goto on_clear;
     }
 
-    // Write the value
-    UA_StatusCode sc = UA_Client_writeValueAttribute(opcua_client.client, si->nodeId, ua_value);
-    UA_Variant_delete(ua_value);
-    if ( sc != UA_STATUSCODE_GOOD ) error = (char*)UA_StatusCode_name( sc );
+    char **_results = malloc(size * sizeof(char *));
+
+    for(size_t i=0; i<size; i++){
+        if(response.results[i] != UA_STATUSCODE_GOOD) {
+            _results[i] = (char *)UA_StatusCode_name( response.results[i] );
+        }else{
+            _results[i] = NULL;
+        }
+    }
+    *results = _results;
 
 on_clear:
-    pthread_mutex_unlock(&opcua_client.lock);
+    UA_WriteRequest_clear(&request);
+    UA_WriteResponse_clear(&response);
     return error;
 }
 

@@ -179,30 +179,6 @@ on_error:
     return NULL;
 }
 
-static cJSON* opcua_client_read_item(cJSON* args, char **error){
-    LOGTRACE("read item");
-
-    if (!is_started()){
-        *error = "no connection";
-        goto on_error;
-    }
-
-    //-----------validate the arguments-----------------------
-    if (!cJSON_IsString(args) || (args->valuestring == NULL)){
-        *error = "path is not defined";
-        goto on_error; 
-    }
-
-    cJSON *value = NULL;
-    *error = read_value( args->valuestring, &value );
-    if (*error) goto on_error;
-
-    return value;
-
-on_error:
-    return NULL;
-}
-
 static cJSON* opcua_client_read_items(cJSON* args, char **error){
     LOGTRACE("read items");
     cJSON *response = NULL;
@@ -245,7 +221,6 @@ static cJSON* opcua_client_read_items(cJSON* args, char **error){
                 goto on_clear;
             }
         }else{
-            //LOGINFO("DEBUG: add to valid %s",item->valuestring);
             nodeId[valid++] = n;
         }
     }
@@ -256,7 +231,6 @@ static cJSON* opcua_client_read_items(cJSON* args, char **error){
     for(size_t i=0; i<valid; i++){
 
         char *path = lookup_nodeId2path_cache(nodeId[i]);
-        //LOGINFO("DEBUG: result for %s",path);
         
         if (values[i].status != UA_STATUSCODE_GOOD){
             char *e = (char*)UA_StatusCode_name( values[i].status );
@@ -292,71 +266,129 @@ on_clear:
     return NULL;
 }
 
-static cJSON* opcua_client_write_item(cJSON* args, char **error){
-
-    if (!is_started()){
-        *error = "no connection";
-        goto on_error;
-    }
-    //-----------validate the arguments-----------------------
-    if ( !cJSON_IsArray(args) ) {
-        *error = "invalid write_item arguments";
-        goto on_error;
-    }
-
-    cJSON *tag = cJSON_GetArrayItem(args, 0);
-    if (!cJSON_IsString(tag) || (tag->valuestring == NULL)){
-        *error = "item path is not defined";
-        goto on_error; 
-    }
-
-    cJSON *value = cJSON_GetArrayItem(args, 1);
-    if (value == NULL){
-        *error = "item value is not defined";
-        goto on_error; 
-    }
-
-    *error = write_value(tag->valuestring, value);
-    if (*error) goto on_error;
-    
-    return cJSON_CreateString("ok");
-
-on_error:
-    return NULL;
-}
-
 static cJSON* opcua_client_write_items(cJSON* args, char **error){
     LOGTRACE("write items");
-    cJSON *response = cJSON_CreateArray();
+    cJSON *response = NULL;
     cJSON *item = NULL;
-    cJSON *result = NULL;
+
+    UA_NodeId **nodeId = NULL;
+    UA_Variant **values = NULL;
+    char **results = NULL;
+    size_t valid = 0;
 
     if (!is_started()){
         *error = "no connection";
-        goto on_error;
+        goto on_clear;
     }
 
     //-----------validate the arguments-----------------------
-    if ( !cJSON_IsArray(args) ) {
+    if ( !cJSON_IsObject(args) ) {
         *error = "invalid write_items arguments";
-        goto on_error;
+        goto on_clear;
+    }
+
+    // cJSON can handle objects as arrays
+    size_t size = cJSON_GetArraySize( args );
+
+    nodeId = malloc( size * sizeof(UA_NodeId *));
+    if(!nodeId){
+        *error = "out of memory";
+        goto on_clear;
+    }
+
+    values = malloc( size * sizeof(UA_Variant *));
+    if(!values){
+        *error = "out of memory";
+        goto on_clear;
+    }
+
+    response = cJSON_CreateObject();
+    if (!response){
+        *error = "unable to create response object";
+        goto on_clear;
     }
 
     cJSON_ArrayForEach(item, args) {
-        result = opcua_client_write_item( item, error );
-        if (result == NULL){
-            char _error[strlen(*error) + strlen("error: ") + 1];
-            sprintf(_error,"error: %s",*error); 
-            result = cJSON_CreateString(_error);
+        if (!cJSON_IsObject(item->child)){
+            if (!cJSON_AddStringToObject(response, item->string, "error: invalid arguments")){
+                *error = "unable to add item to response";
+                goto on_clear;
+            } 
         }
-        if ( !cJSON_AddItemToArray(response, result) ){
-            *error = "unable add a result for item";
-            goto on_error;
+
+        cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+        if (!cJSON_IsString(type) || (type->valuestring == NULL)){
+            if (!cJSON_AddStringToObject(response, item->string, "error: type not provided")){
+                *error = "unable to add item to response";
+                goto on_clear;
+            } 
+        }
+
+        cJSON *value = cJSON_GetObjectItemCaseSensitive(item, "value");
+        if (value == NULL){
+            if (!cJSON_AddStringToObject(response, item->string, "error: value not provided")){
+                *error = "unable to add item to response";
+                goto on_clear;
+            }
+        }
+
+        UA_NodeId *n = lookup_path2nodeId_cache( item->string );
+        const UA_DataType *ua_type = type2ua( type->valuestring );
+        if (!n){
+            if (!cJSON_AddStringToObject(response, item->string, "error: invalid node")){
+                *error = "unable to add item to response";
+                goto on_clear;
+            }
+        }else if(!ua_type){
+            if (!cJSON_AddStringToObject(response, item->string, "error: unsupported type")){
+                *error = "unable to add item to response";
+                goto on_clear;
+            }
+        }else{
+            UA_Variant *ua_value = json2ua(ua_type, value);
+            if (!ua_value){
+                if (!cJSON_AddStringToObject(response, item->string, "error: invalid value")){
+                    *error = "unable to add item to response";
+                    goto on_clear;
+                }
+            }else{
+                nodeId[valid] = n;
+                values[valid++] = ua_value;
+            }
         }
     }
 
-    return response;
-on_error:
+    if(!valid) goto on_clear;
+
+    *error = write_values(valid, nodeId, values, &results);
+    if (*error) goto on_clear;
+
+    for(size_t i=0; i<valid; i++){
+
+        char *path = lookup_nodeId2path_cache(nodeId[i]);
+
+        if (results[i]){
+            char _err[strlen(results[i]) + 8]; // error: 
+            sprintf(_err,"error: %s",results[i]);
+            if (!cJSON_AddStringToObject(response, path, _err)){
+                *error = "unable to add item to response";
+                goto on_clear;
+            }
+        }else{
+            if (!cJSON_AddStringToObject(response, path, "ok")){
+                *error = "unable to add item to response";
+                goto on_clear;
+            }
+        }
+    }
+
+on_clear:
+    if(nodeId) free(nodeId);
+    if(values) free(values);
+    if(results) free(results);
+
+    if(!*error) return response;
+
     cJSON_Delete( response );
     return NULL;
 }
@@ -383,8 +415,9 @@ static cJSON* opcua_client_search(cJSON* args, char **error){
         goto on_error;
     }
 
-    items = get_all_cache_items();
-    for (int i = 0; items[i].nodeId; i++){
+    size_t size = 0;
+    items = get_all_cache_items(&size);
+    for (int i = 0; i<size; i++){
         if (strstr(items[i].path, search)){
             if (!cJSON_AddNumberToObject(response,items[i].path, items[i].nodeClass)){
                 *error = "unable to add an item to the result";
@@ -417,12 +450,8 @@ static cJSON* on_request( char *method, cJSON *args, char **error ){
         response = opcua_client_connect( args, error );
     }else if (strcmp(method, "read_items") == 0){
         response = opcua_client_read_items( args, error );
-    }else if (strcmp(method, "read_item") == 0){
-        response = opcua_client_read_item( args, error );
     }else if (strcmp(method, "write_items") == 0){
         response = opcua_client_write_items( args, error );
-    }else if (strcmp(method, "write_item") == 0){
-        response = opcua_client_write_item( args, error );
     }else if (strcmp(method, "search") == 0){
         response = opcua_client_search( args, error );
     } else{

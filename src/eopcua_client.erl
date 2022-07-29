@@ -35,9 +35,7 @@
     browse_servers/2,browse_servers/3,
     connect/2,connect/3,
     read_items/2,read_items/3,
-    read_item/2,read_item/3,
     write_items/2,write_items/3,
-    write_item/3,write_item/4,
     search/2,search/3,
     create_certificate/1
 ]).
@@ -121,36 +119,22 @@ read_items(PID, Items, Timeout)->
             Error
     end.
 
-read_item(PID, Item)->
-    read_item(PID, Item, undefined).
-read_item(PID, Item, Timeout)->
-    eport_c:request( PID, <<"read_item">>, Item, Timeout ).
-
 write_items(PID, Items)->
     write_items(PID, Items, undefined).
 write_items(PID, Items, Timeout)->
-    Items1 =
-        [ [ I, V] || {I, V} <- maps:to_list( Items )],
-    case eport_c:request( PID, <<"write_items">>, Items1, Timeout ) of
+    case eport_c:request( PID, <<"write_items">>, Items, Timeout ) of
         {ok, Results}->
             Results1 =
-                [ case V of
-                      <<"error: ", ItemError/binary>>->
-                          {error, ItemError};
-                      _-> ok
-                  end || V <- Results ],
-            { ok, maps:from_list(lists:zip( [I || [I,_] <- Items1], Results1 )) };
+                maps:map(fun(_K,V)->
+                    case V of
+                        <<"error: ", ItemError/binary>>->
+                            {error, ItemError};
+                        _-> ok
+                    end
+                end, Results),
+            { ok, Results1 };
         Error->
             Error
-    end.
-
-
-write_item(PID, Item, Value)->
-    write_item(PID, Item, Value, undefined).
-write_item(PID, Item, Value, Timeout)->
-    case eport_c:request( PID, <<"write_item">>, [Item,Value], Timeout ) of
-        {ok, <<"ok">>} -> ok;
-        Error -> Error
     end.
 
 

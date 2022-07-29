@@ -44,19 +44,24 @@ Client Example
     % Search by empty string returns all the items
     {ok, ResultMap} = eopcua_client:search(Port, <<"Analog">> ).
     
-    {ok,SinusoidValue} = eopcua_client:read_item(Port, <<"Simulation/Sinusoid">> ).
+    {ok,#{<<"Simulation/Sinusoid">> := SinusoidValue}} = eopcua_client:read_items(Port, [<<"Simulation/Sinusoid">>] ).
 
     {ok,#{
         <<"Server/ServerStatus/State">> := State,
         <<"Simulation/Sinusoid">> := Sinusoid
     }} = eopcua_client:read_items(Port, [ <<"Server/ServerStatus/State">>, <<"Simulation/Sinusoid">> ]).
-    
-    ok = eopcua_client:write_item(Port, <<"StaticData/AnalogItems/Int32AnalogItem">>, 38).
+
+    {ok,#{<<"StaticData/AnalogItems/Int32AnalogItem">> := ok }} = eopcua_client:write_items(Port, #{
+        <<"StaticData/AnalogItems/Int32AnalogItem">> => #{type => <<"Int32">>, value => 38}
+    }).
 
     {ok,#{
         <<"StaticData/AnalogItems/Int32AnalogItem">> := ok,
         <<"StaticData/AnalogItems/ItDoesnNotExist">> := {error, Error}
-    }} = eopcua_client:write_items(Port, #{<<"StaticData/AnalogItems/Int32AnalogItem">> => 34, <<"StaticData/AnalogItems/ItDoesnNotExist">> => 34.34}).
+    }} = eopcua_client:write_items(Port, #{
+        <<"StaticData/AnalogItems/Int32AnalogItem">> => #{type => <<"Int32">>, value => 65}, 
+        <<"StaticData/AnalogItems/ItDoesnNotExist">> => #{type => <<"Double">>, value => 34.34}
+    }).
 
     ok = eopcua_client:set_log_level(Port, trace).  #; trace, debug, info, warning, error, fatal
 

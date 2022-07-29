@@ -28,9 +28,11 @@ typedef struct {
 } opcua_item;
 
 char *add_cache(char *path, UA_NodeId *nodeId, int nodeClass);
+
 UA_NodeId *lookup_path2nodeId_cache(char *path);
 char *lookup_nodeId2path_cache(UA_NodeId *nodeId);
-opcua_item * get_all_cache_items(void);
+
+opcua_item * get_all_cache_items(size_t *size);
 void purge_cache(void);
 
 #endif
