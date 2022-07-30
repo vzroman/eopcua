@@ -73,7 +73,12 @@ set_log_level(PID, Level)->
 %%==============================================================================
 browse_servers(PID, Params)->
     browse_servers(PID, Params, undefined).
-browse_servers(PID, #{host:=Host} = Params, Timeout)->
+browse_servers(PID, Params, Timeout)->
+    Host =
+        case Params of
+            #{host:=H} ->H;
+            #{<<"host">>:=H}->H
+        end,
     case eport_c:request( PID, <<"browse_servers">>, Params, Timeout ) of
         {ok, Endpoints} when length(Endpoints)>0->
             {ok, [ replace_host(E, Host) || E <- Endpoints]};
