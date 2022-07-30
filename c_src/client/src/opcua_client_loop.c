@@ -106,7 +106,7 @@ static char *handle_browse_queue(){
 
 on_clear:
     UA_Array_delete(browsePath,size,&UA_TYPES[UA_TYPES_BROWSEPATH]);
-    UA_TranslateBrowsePathsToNodeIdsRequest_clear( &request );
+    //UA_TranslateBrowsePathsToNodeIdsRequest_clear( &request );
     UA_TranslateBrowsePathsToNodeIdsResponse_clear(&response);
     purge_browse_queue();
     return error;
@@ -210,7 +210,7 @@ static char *replace_host(char *URL, char *host){
     size_t tailLength = strlen( tail );
     size_t resultLength = prefixLength + hostLength + tailLength + 1;
     
-    char result[resultLength]; // allocate the memory for the result
+    char result[resultLength+1]; // allocate the memory for the result
 
     // Copy the protocol
     strncpy(result, URL, prefixLength);
@@ -219,7 +219,9 @@ static char *replace_host(char *URL, char *host){
     strncpy(result + prefixLength, host, hostLength);
 
     // Copy the tail
-    strncpy(result + prefixLength + hostLength, tail, tailLength + 1);
+    strncpy(result + prefixLength + hostLength, tail, tailLength);
+
+    result[resultLength+1] = '\0';
 
     return strdup(result);
 }
