@@ -27,6 +27,7 @@
 #include "utilities.h"
 #include "opcua_client_browse.h"
 #include "opcua_client_loop.h"
+#include "opcua_client_browse_queue.h"
 
 //-----------------------------------------------------
 //  eport_c API
@@ -231,11 +232,16 @@ static cJSON* opcua_client_read_items(cJSON* args, char **error){
     cJSON_ArrayForEach(item, args) {
         UA_NodeId *n = lookup_path2nodeId_cache( item->valuestring );
         if (!n){
+            *error = add_browse_queue( item->valuestring );
+            if (*error) goto on_clear;
+
             cJSON_AddStringToObject(response, item->valuestring, "invalid node");
         }else{
             nodeId[valid++] = n;
         }
     }
+
+    if (!valid) goto on_clear;
 
     *error = read_values(valid, nodeId, &values);
     if (*error) goto on_clear;
@@ -320,6 +326,9 @@ static cJSON* opcua_client_write_items(cJSON* args, char **error){
 
         UA_NodeId *n = lookup_path2nodeId_cache( item->string );
         if (!n){
+            *error = add_browse_queue( item->valuestring );
+            if (*error) goto on_clear;
+
             cJSON_AddStringToObject(response, item->string, "invalid node");
             continue;
         }

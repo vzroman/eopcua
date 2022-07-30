@@ -118,8 +118,8 @@ void purge_cache(){
     // Purge path2nodeId index
     opcua_client_path2nodeId_cache *path2NodeId;
     for (path2NodeId= __path2nodeId_cache; path2NodeId != NULL; path2NodeId = path2NodeId->hh.next) {
-        HASH_DEL(__path2nodeId_cache, path2NodeId);
         free( path2NodeId->path );
+        HASH_DEL(__path2nodeId_cache, path2NodeId);
         // MEMORY LEAK! We have to free nodeId but it causes 
         //      malloc_consolidate(): invalid chunk size
         //UA_NodeId_delete( path2NodeId->nodeId );

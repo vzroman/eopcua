@@ -18,12 +18,14 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include <open62541/types.h>
 #include <open62541/client_config_default.h>
 #include <open62541/client_highlevel.h>
 #include <open62541/client_subscriptions.h>
 
 #include "utilities.h"
 #include "opcua_client_browse.h"
+#include "opcua_client_browse_queue.h"
 #include "opcua_client_loop.h"
 
 struct OPCUA_CLIENT {
@@ -36,6 +38,80 @@ struct OPCUA_CLIENT {
 //-----------------------------------------------------
 //  Internal utilities
 //-----------------------------------------------------
+static void browse_item(char *path, UA_BrowsePath *browsePath){
+
+    char **tokens = str_split( path, '/');
+    if (!tokens){
+        tokens = malloc( 2 * sizeof(char *));
+        tokens[0] = strdup( path );
+        tokens[1] = NULL;
+    }
+    size_t size;
+    for (size = 0; tokens[size]; size++);
+
+    UA_BrowsePath_init( browsePath );
+    browsePath->startingNode = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    browsePath->relativePath.elements = (UA_RelativePathElement*)UA_Array_new(size, &UA_TYPES[UA_TYPES_RELATIVEPATHELEMENT]);
+    browsePath->relativePath.elementsSize = size;
+
+    for(size_t i = 0; i < size; i++) {
+        UA_RelativePathElement *elem = &browsePath->relativePath.elements[i];
+        elem->targetName = UA_QUALIFIEDNAME_ALLOC(1, tokens[i]);
+    }
+
+    str_split_destroy( tokens );
+}
+
+static char *handle_browse_queue(){
+    char *error = NULL;
+    size_t size;
+    char **queue = get_browse_queue(&size);
+
+    if (size && queue == NULL) return "out of memory";
+    if (!size) return NULL;
+
+    UA_BrowsePath *browsePath = (UA_BrowsePath*)UA_Array_new(size, &UA_TYPES[UA_TYPES_BROWSEPATH]);
+    if (!browsePath) return "out of memory";
+
+    for (size_t i=0; i< size; i++) browse_item( queue[i], &browsePath[i]);
+
+    UA_TranslateBrowsePathsToNodeIdsRequest request;
+    UA_TranslateBrowsePathsToNodeIdsRequest_init(&request);
+    request.browsePaths = browsePath;
+    request.browsePathsSize = size;
+
+    pthread_mutex_lock(&opcua_client.lock);
+    UA_TranslateBrowsePathsToNodeIdsResponse response = UA_Client_Service_translateBrowsePathsToNodeIds(opcua_client.client, request);
+    pthread_mutex_unlock(&opcua_client.lock);
+
+    if (response.responseHeader.serviceResult != UA_STATUSCODE_GOOD){
+        error = (char *)UA_StatusCode_name( response.responseHeader.serviceResult );
+        goto on_clear;
+    }
+
+    if (response.resultsSize != size){
+        error = "unexpected response size";
+        goto on_clear;
+    }
+
+    for (size_t i=0; i<size; i++){
+        if (response.results[i].statusCode != UA_STATUSCODE_GOOD) continue;
+        size_t depth = response.results[i].targetsSize;
+
+        UA_NodeId *nodeIdCopy = UA_NodeId_new();
+        UA_NodeId_copy(&response.results[i].targets[depth -1].targetId.nodeId, nodeIdCopy);
+        
+        add_cache( strdup(queue[i]), nodeIdCopy, UA_NODECLASS_VARIABLE );
+    }
+
+on_clear:
+    UA_Array_delete(browsePath,size,&UA_TYPES[UA_TYPES_BROWSEPATH]);
+    UA_TranslateBrowsePathsToNodeIdsRequest_clear( &request );
+    UA_TranslateBrowsePathsToNodeIdsResponse_clear(&response);
+    purge_browse_queue();
+    return error;
+}
+
 static void *update_loop_thread(void *arg) {
     LOGINFO("starting the update loop thread");
 
@@ -55,8 +131,11 @@ static void *update_loop_thread(void *arg) {
         if (sc != UA_STATUSCODE_GOOD){
             error = (char *)UA_StatusCode_name( sc );
         }
-
         pthread_mutex_unlock(&opcua_client.lock);
+
+        error = handle_browse_queue();
+        if (error) LOGERROR("handle browse queue error %s", error);
+
         if (error){
             LOGERROR("update loop error %s", error);
             break;
