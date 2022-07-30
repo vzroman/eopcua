@@ -106,7 +106,6 @@ static char *handle_browse_queue(){
 
 on_clear:
     UA_Array_delete(browsePath,size,&UA_TYPES[UA_TYPES_BROWSEPATH]);
-    //UA_TranslateBrowsePathsToNodeIdsRequest_clear( &request );
     UA_TranslateBrowsePathsToNodeIdsResponse_clear(&response);
     purge_browse_queue();
     return error;
@@ -184,46 +183,6 @@ static char *init_update_loop(int cycle){
 on_error:
     opcua_client.run = false;
     return error;
-}
-
-static char *replace_host(char *URL, char *host){
-
-    // opc.tcp://fp-roman:53530/OPCUA/SimulationServer
-
-    char *hostStart = strstr(URL, "//");
-    if (hostStart == NULL){
-        // Is it possible? Just return the original URL
-        return strdup(URL);
-    }
-    // The point where the host starts
-    hostStart += 2;
-
-    // The point where the ports starts
-    char *tail = strstr(hostStart, ":");
-    if (tail == NULL){
-        // Is it possible? Just return the original URL
-        return strdup(URL);
-    }
-
-    size_t prefixLength = hostStart - URL;
-    size_t hostLength = strlen( host );
-    size_t tailLength = strlen( tail );
-    size_t resultLength = prefixLength + hostLength + tailLength + 1;
-    
-    char result[resultLength+1]; // allocate the memory for the result
-
-    // Copy the protocol
-    strncpy(result, URL, prefixLength);
-
-    // Copy the host 
-    strncpy(result + prefixLength, host, hostLength);
-
-    // Copy the tail
-    strncpy(result + prefixLength + hostLength, tail, tailLength);
-
-    result[resultLength+1] = '\0';
-
-    return strdup(result);
 }
 
 static char* check_connected( UA_StatusCode sc ){
@@ -408,7 +367,7 @@ char* browse_servers(char *host, int port, char ***urls){
     n = 0;
     for(size_t i = 0; i < adSize; i++) {
         for(size_t j = 0; j < ad[i].discoveryUrlsSize; j++) {
-            *(result + n) = replace_host((char *)ad[i].discoveryUrls[j].data, host);
+            *(result + n) = strdup((char *)ad[i].discoveryUrls[j].data);
             n++;
         }
     }

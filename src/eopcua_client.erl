@@ -73,8 +73,15 @@ set_log_level(PID, Level)->
 %%==============================================================================
 browse_servers(PID, Params)->
     browse_servers(PID, Params, undefined).
-browse_servers(PID, Params, Timeout)->
-    eport_c:request( PID, <<"browse_servers">>, Params, Timeout ).
+browse_servers(PID, #{host:=Host} = Params, Timeout)->
+    case eport_c:request( PID, <<"browse_servers">>, Params, Timeout ) of
+        {ok, Endpoints} when length(Endpoints)>0->
+            {ok, [ replace_host(E, Host) || E <- Endpoints]};
+        {ok,_}->
+            {error, no_endpoints_found};
+        Error->
+            Error
+    end.
 
 % Params example:
 %     {
@@ -134,5 +141,12 @@ create_certificate( Name )->
 
     Result.
 
+replace_host(Endpoint, Host)->
+    % Open62541 sometimes returns bad strings in ad[i].discoveryUrls[j].data
+    % probably without the null at the end
+    E = << <<C>> || <<C>> <= Endpoint, C >= 33, C =< 127 >>,
+    % We need to replace host in the original endpoint to be able to connect
+    % to the server even if its host name is not resolved to the IP
+    re:replace(E,"//.*:",<<"//",Host/binary,":">>,[{return,binary}]).
 
 
