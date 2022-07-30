@@ -346,7 +346,7 @@ char *configure(UA_ServerConfig *config, cJSON* args){
     char *error = NULL;
     UA_StatusCode sc;
 
-    UA_Int16 ua_port = 4840;
+    UA_Int16 ua_port = 4841;
 
     //----------options-----------------
     cJSON *port = cJSON_GetObjectItemCaseSensitive(args, "port");

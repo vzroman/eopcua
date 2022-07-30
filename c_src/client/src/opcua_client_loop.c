@@ -228,6 +228,19 @@ static char *replace_host(char *URL, char *host){
     return result;
 }
 
+static char* check_connected( UA_StatusCode sc ){
+    if (sc != UA_STATUSCODE_BADCONNECTIONCLOSED 
+    && sc != UA_STATUSCODE_BADCONNECTIONREJECTED
+    && sc != UA_STATUSCODE_BADDISCONNECT
+    && sc != UA_STATUSCODE_BADMAXCONNECTIONSREACHED
+    && sc != UA_STATUSCODE_BADSERVERNOTCONNECTED){
+        return (char*)UA_StatusCode_name( sc );
+    }else{
+        stop();
+        return "no connection";
+    }
+}
+
 //-----------------------------------------------------
 //  API
 //-----------------------------------------------------
@@ -449,7 +462,7 @@ char *read_values(size_t size, UA_NodeId **nodeId, UA_DataValue **values){
 
     UA_StatusCode sc = response.responseHeader.serviceResult;
     if(sc != UA_STATUSCODE_GOOD) {
-        error = (char*)UA_StatusCode_name( sc );
+        error = check_connected(sc);
         goto on_clear;
     }
 
@@ -497,7 +510,7 @@ char *write_values(size_t size, UA_NodeId **nodeId, UA_Variant **values, char **
 
     UA_StatusCode sc = response.responseHeader.serviceResult;
     if(sc != UA_STATUSCODE_GOOD) {
-        error = (char*)UA_StatusCode_name( sc );
+        error = check_connected(sc);
         goto on_clear;
     }
     if(response.resultsSize != size){
