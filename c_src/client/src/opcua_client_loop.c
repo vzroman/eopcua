@@ -211,6 +211,7 @@ static char *replace_host(char *URL, char *host){
     size_t resultLength = prefixLength + hostLength + tailLength + 1;
     
     char *result = (char *)malloc( resultLength ); // allocate the memory for the result
+    memset(result,0,resultLength);
     if (!result){
         LOGERROR("unable to allocate a memory for the result");
         return strdup(URL);
