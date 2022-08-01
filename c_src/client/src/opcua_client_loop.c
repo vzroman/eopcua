@@ -344,6 +344,7 @@ char* browse_servers(char *host, int port, char ***urls){
     // Request endpoints
     size_t adSize = 0;
     sc = UA_Client_findServers(client, url, 0, NULL, 0, NULL, &adSize, &ad);
+
     if(sc != UA_STATUSCODE_GOOD) {
         error = (char*)UA_StatusCode_name( sc );
         goto on_clear;
@@ -391,7 +392,7 @@ on_clear:
         }
         free(result);
     }
-    return NULL;
+    return error;
 }
 
 char *read_values(size_t size, UA_NodeId **nodeId, UA_DataValue **values){
