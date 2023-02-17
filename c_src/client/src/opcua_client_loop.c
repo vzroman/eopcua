@@ -201,7 +201,7 @@ static char* check_connected( UA_StatusCode sc ){
 //-----------------------------------------------------
 //  API
 //-----------------------------------------------------
-char *start(char *url, char *certificate, char *privateKey, char *login, char *pass, uint cycle, size_t maxNodesPerBrowse){
+char *start(char *url, char *certificate, char *privateKey, char *login, char *pass, int cycle, size_t maxNodesPerBrowse){
     char *error = NULL;
     UA_StatusCode sc;
 

@@ -21,7 +21,7 @@
 
 #include <eport_c.h>
 
-char *start(char *url, char *certificate, char *privateKey, char *login, char *pass, uint cycle, size_t maxNodesPerBrowse);
+char *start(char *url, char *certificate, char *privateKey, char *login, char *pass, int cycle, size_t maxNodesPerBrowse);
 void stop(void);
 bool is_started(void);
 
