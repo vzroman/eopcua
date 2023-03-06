@@ -33,7 +33,7 @@
 
 char** str_split(char* a_str, const char a_delim){
 
-    // Check id the string is empty
+    // Check if the string is empty
     if (strlen(a_str) == 0){
         return NULL;
     }
