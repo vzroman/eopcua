@@ -72,13 +72,12 @@ char** str_split(char* a_str, const char a_delim){
         size_t idx  = 0;
         char* token = strtok(a_str, delim);
 
-        while (token)
-        {
-            assert(idx < count);
-            *(result + idx++) = strdup(token);
+        for (size_t i=0; i< count; i++){
+            if (token) {
+                *(result + idx++) = strdup(token);
+            }
             token = strtok(0, delim);
         }
-        assert(idx == count - 1);
         *(result + idx) = 0;
     }
 
