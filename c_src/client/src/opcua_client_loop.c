@@ -22,6 +22,7 @@
 #include <open62541/client_config_default.h>
 #include <open62541/client_highlevel.h>
 #include <open62541/client_subscriptions.h>
+#include <open62541/plugin/pki_default.h>
 
 #include "utilities.h"
 #include "opcua_client_browse.h"
@@ -260,6 +261,8 @@ char *start(char *url, char *certificate, char *privateKey, char *login, char *p
             error = (char*)UA_StatusCode_name( sc );
             goto on_error;
         };
+
+        UA_CertificateVerification_AcceptAll( &config->certificateVerification );
 
         config->clientDescription.applicationUri = UA_STRING_ALLOC(appURI);
 
